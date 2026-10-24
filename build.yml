@@ -1,0 +1,61 @@
+name: Build Satsuma for Windows
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    env:
+      QT_QPA_PLATFORM: offscreen
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install requirements
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt pytest pyinstaller==6.22.3
+
+      - name: Fetch FFmpeg with Satsuma's own downloader
+        run: python -c "from satsuma.engine import ffmpeg_tool as f; p = f.download(); print(p); assert f.ffprobe_path()"
+
+      - name: Run tests on Windows
+        run: python -m pytest -v -p no:cacheprovider tests
+
+      - name: Build Satsuma.exe
+        run: >
+          python -m PyInstaller --noconfirm --clean --windowed
+          --name Satsuma --icon assets\icon.ico --add-data "assets;assets"
+          --collect-all pypdfium2 --collect-all pypdfium2_raw --collect-all pillow_heif
+          main.py
+
+      - name: Smoke-test the built exe
+        shell: pwsh
+        run: |
+          $env:QT_QPA_PLATFORM = ""
+          $p = Start-Process -FilePath "dist\Satsuma\Satsuma.exe" -ArgumentList "--background" -PassThru
+          Start-Sleep -Seconds 12
+          if ($p.HasExited) { Write-Error "Satsuma.exe exited early with code $($p.ExitCode)"; exit 1 }
+          $log = Join-Path $env:LOCALAPPDATA "Satsuma\satsuma.log"
+          if (-not (Test-Path $log)) { Write-Error "no log written at $log"; exit 1 }
+          Get-Content $log
+          if (Select-String -Path $log -Pattern "CRITICAL|Traceback" -Quiet) { Write-Error "errors in log"; exit 1 }
+          Stop-Process -Id $p.Id -Force
+          Write-Host "Satsuma.exe started and stayed up."
+
+      - name: Zip
+        shell: pwsh
+        run: Compress-Archive -Path dist\Satsuma -DestinationPath dist\Satsuma-windows.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Satsuma-windows
+          path: dist/Satsuma-windows.zip
