@@ -4,3 +4,4 @@ Pillow==12.3.0
 pypdf==6.17.0
 pypdfium2==5.13.0
 pillow-heif==1.8.1
+cryptography==50.0.2

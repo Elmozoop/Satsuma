@@ -112,6 +112,12 @@ def _image_actions() -> list[Action]:
                _each(lambda p, _params: images.rotate(p, 90)), icon="rotate"),
         Action("img-flip", "Flip", "mirror", "tools",
                _each(lambda p, _params: images.flip(p, horizontal=True)), icon="flip"),
+        Action("img-clean", "Clean", "remove location & camera info", "tools",
+               _each(lambda p, _params: images.strip_metadata(p))),
+        Action("img-bw", "B&W", "black and white", "tools",
+               _each(lambda p, _params: images.grayscale(p))),
+        Action("img-square", "Square", "fit, no cropping", "tools",
+               _each(lambda p, _params: images.pad_square(p))),
     ]
     return actions
 
@@ -139,6 +145,13 @@ def _video_actions() -> list[Action]:
                _each(lambda p, _params: media.mute(p)), needs_ffmpeg=True, icon="mute"),
         Action("vid-frame", "Frame", "still as PNG", "tools",
                _each(lambda p, _params: media.snapshot(p)), needs_ffmpeg=True, icon="frame"),
+        Action("vid-speed", "Speed", "faster or slower", "tools",
+               _each(lambda p, params: media.change_speed(p, params["factor"])),
+               needs_ffmpeg=True, prompt="speed"),
+        Action("vid-rotate", "Rotate", "90° clockwise", "tools",
+               _each(lambda p, _params: media.rotate_video(p)), needs_ffmpeg=True, icon="rotate"),
+        Action("vid-boomerang", "Boomerang", "looping GIF", "tools",
+               _each(lambda p, _params: media.boomerang(p)), needs_ffmpeg=True),
         Action("vid-join", "Join", "end to end", "tools",
                _all(lambda ps, _params: media.concat(ps)), min_files=2, needs_ffmpeg=True, icon="join"),
     ]
@@ -166,7 +179,18 @@ def _audio_actions() -> list[Action]:
 
 
 # ----------------------------------------------------------------------------- pdf
-def _pdf_actions() -> list[Action]:
+def _pdf_actions(paths: list[Path] | None = None) -> list[Action]:
+    """`paths` decides between Lock and Unlock; without them (Settings) both are listed."""
+    locked = [pdfs.is_encrypted(p) for p in paths] if paths else None
+    passwords = []
+    if locked is None or not any(locked):
+        passwords.append(Action("pdf-lock", "Lock", "add a password", "tools",
+                                _each(lambda p, params: pdfs.lock(p, params["password"])), prompt="lock"))
+    if locked is None or all(locked):
+        passwords.append(Action("pdf-unlock", "Unlock", "remove the password", "tools",
+                                _each(lambda p, params: pdfs.unlock(p, params["password"])), prompt="unlock"))
+    if locked and all(locked):
+        return passwords   # everything else would fail on a password-protected PDF
     return [
         Action("pdf-merge", "Merge", "one PDF", "convert",
                _all(lambda ps, _params: pdfs.merge(ps)), min_files=2, icon="merge"),
@@ -185,7 +209,9 @@ def _pdf_actions() -> list[Action]:
                prompt="pages", icon="pages"),
         Action("pdf-rotate", "Rotate", "90° clockwise", "tools",
                _each(lambda p, _params: pdfs.rotate(p, 90)), icon="rotate"),
-    ]
+        Action("pdf-numbers", "Numbers", "page numbers", "tools",
+               _each(lambda p, _params: pdfs.add_page_numbers(p)), icon="pages"),
+    ] + passwords
 
 
 # ----------------------------------------------------------------------------- documents
@@ -229,7 +255,7 @@ def actions_for(paths, customise: bool = True) -> list[Action]:
     elif category == ft.AUDIO:
         candidates = _audio_actions()
     elif category == ft.PDF:
-        candidates = _pdf_actions()
+        candidates = _pdf_actions(paths)
     elif category == ft.DOCUMENT:
         candidates = _document_actions(paths)
     elif category == ft.ARCHIVE:

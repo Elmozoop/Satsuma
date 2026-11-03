@@ -1,11 +1,12 @@
-"""Bottom-right stack of job cards: progress and Cancel, then Open / Show in folder / Undo."""
+"""Bottom-right stack of job cards: progress and Cancel, then Open / Show in folder / Undo.
+A finished card can also be dragged, carrying its files into any app that accepts a file drop."""
 from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QPoint, QPointF, QRectF, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QFont, QFontMetrics, QGuiApplication, QPainter, QPainterPath, QPen
-from PySide6.QtWidgets import QWidget
+from PySide6.QtCore import QMimeData, QPoint, QPointF, QRectF, Qt, QTimer, QUrl, Signal
+from PySide6.QtGui import QColor, QDrag, QFont, QFontMetrics, QGuiApplication, QPainter, QPainterPath, QPen
+from PySide6.QtWidgets import QApplication, QFileIconProvider, QWidget
 
 from .. import winutil
 from ..engine.paths import human_size, open_file, reveal, undo_targets
@@ -30,6 +31,7 @@ class Card:
         self.outputs: list[Path] = []
         self.buttons: list[tuple[QRectF, str]] = []
         self.close_rect = QRectF()
+        self.rect = QRectF()
         self.expire_ms = 0
         self.slot = Spring(0.0, "main")       # 0 = bottom of the stack
         self.appear = Spring(0.0, "main")     # slides in from the right
@@ -49,6 +51,7 @@ class Toasts(QWidget):
         self.setMouseTracking(True)
         self.cards: list[Card] = []
         self.hover_button: tuple[int, str] | None = None
+        self._drag_from: tuple[QPointF, Card] | None = None   # press on a finished card's body
         self._tick = QTimer(self)
         self._tick.setInterval(250)
         self._tick.timeout.connect(self._expire)
@@ -193,7 +196,37 @@ class Toasts(QWidget):
         self.hover_button = None
         self.update()
 
+    def _draggable(self, pos: QPointF) -> Card | None:
+        """The finished card under `pos`, unless the point is on one of its buttons."""
+        for card in self.cards:
+            if card.state != "done" or card.leaving or not card.rect.contains(pos):
+                continue
+            if card.close_rect.contains(pos) or any(r.contains(pos) for r, _n in card.buttons):
+                return None
+            return card if any(o.exists() for o in card.outputs) else None
+        return None
+
+    def mousePressEvent(self, event) -> None:
+        card = self._draggable(event.position()) if event.button() == Qt.LeftButton else None
+        self._drag_from = (event.position(), card) if card else None
+
+    def _start_drag(self, card: Card) -> None:
+        files = [o for o in card.outputs if o.exists()]
+        mime = QMimeData()
+        mime.setUrls([QUrl.fromLocalFile(str(f)) for f in files])
+        drag = QDrag(self)
+        drag.setMimeData(mime)
+        icon = QFileIconProvider().icon(card.outputs[0].parent if len(files) > 1 else files[0])
+        drag.setPixmap(icon.pixmap(48, 48))
+        drag.exec(Qt.CopyAction)   # always a copy: the result stays where it is
+
     def mouseMoveEvent(self, event) -> None:
+        if self._drag_from and event.buttons() & Qt.LeftButton:
+            origin, card = self._drag_from
+            if (event.position() - origin).manhattanLength() >= QApplication.startDragDistance():
+                self._drag_from = None
+                self._start_drag(card)
+                return
         found = None
         for card in self.cards:
             for rect, name in card.buttons:
@@ -203,10 +236,13 @@ class Toasts(QWidget):
                 found = (card.id, "close")
         if found != self.hover_button:
             self.hover_button = found
-            self.setCursor(Qt.PointingHandCursor if found else Qt.ArrowCursor)
             self.update()
+        grab = found is None and self._draggable(event.position()) is not None
+        self.setCursor(Qt.PointingHandCursor if found else Qt.OpenHandCursor if grab else Qt.ArrowCursor)
+        self.setToolTip("Drag into another app to share or attach it" if grab else "")
 
     def mouseReleaseEvent(self, event) -> None:
+        self._drag_from = None
         for card in list(self.cards):
             if card.close_rect.contains(event.position()) and not card.leaving:
                 self._remove(card)
@@ -272,6 +308,7 @@ class Toasts(QWidget):
         painter.drawText(QRectF(rect.left() + 30, rect.top() + 30, rect.width() - 44, 18),
                          Qt.AlignLeft | Qt.AlignVCenter, line)
 
+        card.rect = QRectF(rect)
         card.close_rect = QRectF(rect.right() - 30, rect.top() + 8, 22, 22)
         close_hover = self.hover_button == (card.id, "close")
         painter.setPen(QPen(pal.text if close_hover else pal.muted, 1.4, Qt.SolidLine, Qt.RoundCap))

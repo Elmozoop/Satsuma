@@ -122,6 +122,64 @@ def to_gif(source, width: int = 480, fps: int = 12, max_seconds: float = 15.0) -
     return destination
 
 
+def _video_target(source: Path, label: str) -> tuple[Path, list[str]]:
+    """Same container as the source when we know how to write it, otherwise MP4."""
+    extension = source.suffix.lower() if source.suffix.lower() in VIDEO_PROFILES else ".mp4"
+    return target_path(source, extension, stem=f"{source.stem}-{label}"), VIDEO_PROFILES[extension]
+
+
+def atempo_chain(factor: float) -> str:
+    """atempo keeps pitch natural; each stage handles 0.5x–2x, so chain them for bigger changes."""
+    stages = []
+    while factor < 0.5:
+        stages.append(0.5)
+        factor /= 0.5
+    while factor > 2.0:
+        stages.append(2.0)
+        factor /= 2.0
+    stages.append(factor)
+    return ",".join(f"atempo={s:g}" for s in stages)
+
+
+def change_speed(source, factor: float) -> Path:
+    """Play faster (factor > 1) or slower (< 1); audio follows without chipmunk pitch."""
+    source = Path(source)
+    if not 0.1 <= factor <= 10:
+        raise ValueError("Speed must be between 0.1× and 10×.")
+    label = f"{factor:g}x".replace(".", "_")
+    destination, profile = _video_target(source, label)
+    video = f"[0:v:0]setpts=PTS/{factor:g},{EVEN_PAD}[v]"
+    graph, maps = video, ["-map", "[v]"]
+    if ff.has_audio(source):
+        graph += f";[0:a:0]{atempo_chain(factor)}[a]"
+        maps += ["-map", "[a]"]
+    ff.run(["-i", str(source), "-filter_complex", graph, *maps, *profile, str(destination)])
+    return destination
+
+
+def rotate_video(source, clockwise: bool = True) -> Path:
+    source = Path(source)
+    destination, profile = _video_target(source, "rotated")
+    turn = "transpose=1" if clockwise else "transpose=2"
+    ff.run(["-i", str(source), "-map", "0:v:0", "-map", "0:a?", "-vf", f"{turn},{EVEN_PAD}",
+            "-metadata:s:v:0", "rotate=0", *profile, str(destination)])
+    return destination
+
+
+def boomerang(source, seconds: float = 3.0, width: int = 480, fps: int = 15) -> Path:
+    """The first few seconds played forwards then backwards, as an endlessly looping GIF."""
+    source = Path(source)
+    destination = target_path(source, ".gif", stem=f"{source.stem}-boomerang")
+    filters = (
+        f"fps={fps},scale={width}:-1:flags=lanczos,split[f][r];[r]reverse[rv];"
+        f"[f][rv]concat=n=2:v=1:a=0,split[a][b];"
+        f"[a]palettegen=stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=5"
+    )
+    ff.run(["-t", f"{seconds:.2f}", "-i", str(source), "-filter_complex", filters,
+            "-loop", "0", str(destination)])
+    return destination
+
+
 def mute(source) -> Path:
     source = Path(source)
     extension = source.suffix.lower() if source.suffix.lower() in VIDEO_PROFILES else ".mp4"

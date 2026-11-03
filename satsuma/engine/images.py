@@ -194,6 +194,65 @@ def flip(source, horizontal: bool = True) -> Path:
     return destination
 
 
+def _same_format(source: Path) -> tuple[str, str]:
+    """Keep the source's format when we can write it, otherwise PNG."""
+    extension = source.suffix.lower()
+    if extension in PIL_FORMAT and extension != ".pdf":
+        return extension, PIL_FORMAT[extension]
+    return ".png", "PNG"
+
+
+def strip_metadata(source) -> Path:
+    """A copy without hidden details: location, camera, date, comments, thumbnails."""
+    source = Path(source)
+    extension, pil_format = _same_format(source)
+    destination = target_path(source, extension, stem=f"{source.stem}-clean")
+    with Image.open(source) as original:
+        upright = (original.getexif().get(0x0112, 1) or 1) == 1   # no EXIF rotation to bake in
+        if pil_format == "JPEG" and upright and original.format == "JPEG":
+            # Same compressed data, metadata left behind: no quality loss.
+            original.save(destination, "JPEG", quality="keep", optimize=True)
+            return destination
+    with _load(source) as image:          # applies the EXIF rotation, so dropping EXIF is safe
+        clean = Image.new(image.mode, image.size)
+        clean.putdata(image.getdata())
+        if image.mode == "P":
+            clean.putpalette(image.getpalette())
+            if "transparency" in image.info:
+                clean.info["transparency"] = image.info["transparency"]
+        _save(_prepare(clean, pil_format), destination, pil_format, quality=95 if pil_format in LOSSY else None)
+    return destination
+
+
+def grayscale(source) -> Path:
+    source = Path(source)
+    extension, pil_format = _same_format(source)
+    with _load(source) as image:
+        has_alpha = image.mode in ("RGBA", "LA", "PA") or "transparency" in image.info
+        grey = image.convert("LA" if has_alpha else "L")
+        if pil_format in ("WEBP", "AVIF", "HEIF", "ICO"):
+            grey = grey.convert("RGBA" if has_alpha else "RGB")
+        destination = target_path(source, extension, stem=f"{source.stem}-bw")
+        _save(_prepare(grey, pil_format), destination, pil_format)
+    return destination
+
+
+def pad_square(source) -> Path:
+    """Fit the whole picture on a square canvas (for profile pictures, posts): nothing is cropped.
+    The border is transparent where the format allows it, white otherwise."""
+    source = Path(source)
+    extension, pil_format = _same_format(source)
+    with _load(source) as image:
+        width, height = image.size
+        side = max(width, height)
+        transparent = pil_format not in NO_ALPHA
+        canvas = Image.new("RGBA", (side, side), (255, 255, 255, 0 if transparent else 255))
+        canvas.paste(image.convert("RGBA"), ((side - width) // 2, (side - height) // 2))
+        destination = target_path(source, extension, stem=f"{source.stem}-square")
+        _save(_prepare(canvas, pil_format), destination, pil_format)
+    return destination
+
+
 def to_pdf(sources, destination_hint=None) -> Path:
     """Combine one or more images into a single PDF, in the order given."""
     sources = [Path(p) for p in sources]

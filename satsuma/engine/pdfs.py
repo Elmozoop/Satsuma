@@ -208,3 +208,94 @@ def compress(source, max_image_edge: int = 1600, quality: int = 70) -> Path:
 
     destination = target_path(source, ".pdf", stem=f"{source.stem}-compressed")
     return _write(writer, destination)
+
+
+# ----------------------------------------------------------------------------- passwords
+def is_encrypted(path) -> bool:
+    """True if opening the PDF needs a password (not just an empty owner password)."""
+    try:
+        reader = PdfReader(str(path))
+        return bool(reader.is_encrypted) and reader.decrypt("") == 0
+    except Exception:
+        return False
+
+
+def lock(source, password: str) -> Path:
+    """A copy that asks for `password` to open (AES-256)."""
+    source = Path(source)
+    if not password:
+        raise ValueError("Type a password first.")
+    writer = PdfWriter()
+    writer.append(_reader(source))
+    writer.encrypt(user_password=password, owner_password=password, algorithm="AES-256")
+    return _write(writer, target_path(source, ".pdf", stem=f"{source.stem}-locked"))
+
+
+def unlock(source, password: str) -> Path:
+    """A copy without the password, for someone who knows it."""
+    source = Path(source)
+    reader = PdfReader(str(source))
+    if not reader.is_encrypted:
+        raise ValueError("This PDF has no password.")
+    try:
+        ok = reader.decrypt(password)
+    except Exception as exc:
+        raise PdfLocked(f"Couldn't open it with that password ({exc}).") from exc
+    if ok == 0:
+        raise PdfLocked("That password isn't right.")
+    writer = PdfWriter()
+    writer.append(reader)
+    return _write(writer, target_path(source, ".pdf", stem=f"{source.stem}-unlocked"))
+
+
+# ----------------------------------------------------------------------------- page numbers
+def add_page_numbers(source) -> Path:
+    """Stamp "3 / 12" at the bottom centre of every page."""
+    from .documents import _on_gui_thread
+
+    source = Path(source)
+    reader = _reader(source)
+    writer = PdfWriter()
+    writer.append(reader)
+    sizes = []
+    for page in writer.pages:
+        page.transfer_rotation_to_content()     # so "bottom" is the bottom the reader sees
+        box = page.mediabox
+        sizes.append((float(box.width), float(box.height), float(box.left), float(box.bottom)))
+    overlay = PdfReader(io.BytesIO(_on_gui_thread(lambda: _number_pages([s[:2] for s in sizes]))))
+    for page, stamp, (_w, _h, left, bottom) in zip(writer.pages, overlay.pages, sizes):
+        page.merge_translated_page(stamp, left, bottom)
+    return _write(writer, target_path(source, ".pdf", stem=f"{source.stem}-numbered"))
+
+
+def _number_pages(sizes: list[tuple[float, float]]) -> bytes:
+    """A PDF of transparent pages, each the given size in points, with only its number on it.
+    Qt's text engine has to run on the GUI thread."""
+    from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QMarginsF, QRectF, QSizeF, Qt
+    from PySide6.QtGui import QColor, QFont, QPageLayout, QPageSize, QPainter, QPdfWriter
+
+    data = QByteArray()
+    buffer = QBuffer(data)
+    buffer.open(QIODevice.WriteOnly)
+    writer = QPdfWriter(buffer)
+    writer.setResolution(72)    # 1 unit = 1 point, the PDF's own unit
+
+    def size_page(width: float, height: float) -> None:
+        writer.setPageLayout(QPageLayout(QPageSize(QSizeF(width, height), QPageSize.Point),
+                                         QPageLayout.Portrait, QMarginsF(0, 0, 0, 0)))
+
+    size_page(*sizes[0])
+    painter = QPainter(writer)
+    font = QFont("Segoe UI")
+    font.setPointSizeF(9)
+    painter.setFont(font)
+    painter.setPen(QColor(90, 90, 90))
+    total = len(sizes)
+    for index, (width, height) in enumerate(sizes):
+        if index:
+            size_page(width, height)
+            writer.newPage()
+        painter.drawText(QRectF(0, height - 30, width, 16), Qt.AlignCenter, f"{index + 1} / {total}")
+    painter.end()
+    buffer.close()
+    return bytes(data)

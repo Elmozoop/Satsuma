@@ -175,7 +175,77 @@ class PagesPrompt(_Base):
         return None
 
 
-PROMPTS = {"resize": ResizePrompt, "trim": TrimPrompt, "pages": PagesPrompt}
+def _password_field() -> QLineEdit:
+    field = QLineEdit()
+    field.setEchoMode(QLineEdit.Password)
+    field.setMinimumWidth(220)
+    return field
+
+
+class LockPrompt(_Base):
+    def __init__(self, paths: list[Path]):
+        subtitle = paths[0].name if len(paths) == 1 else f"{len(paths)} PDFs (same password)"
+        super().__init__("Add a password", subtitle)
+        self.password = _password_field()
+        self.again = _password_field()
+        self.grid.addWidget(QLabel("Password"), 0, 0)
+        self.grid.addWidget(self.password, 0, 1)
+        self.grid.addWidget(QLabel("Again"), 1, 0)
+        self.grid.addWidget(self.again, 1, 1)
+        note = QLabel("Satsuma doesn't keep it. If you forget it, the copy can't be opened.")
+        note.setStyleSheet("color:gray")
+        note.setWordWrap(True)
+        self.grid.addWidget(note, 2, 0, 1, 2)
+        self.password.setFocus()
+
+    def validate(self) -> str | None:
+        if not self.password.text():
+            return "Type a password."
+        if self.password.text() != self.again.text():
+            return "The two passwords don't match."
+        self.result_params = {"password": self.password.text()}
+        return None
+
+
+class UnlockPrompt(_Base):
+    def __init__(self, paths: list[Path]):
+        super().__init__("Remove the password", paths[0].name if len(paths) == 1 else f"{len(paths)} PDFs")
+        self.password = _password_field()
+        self.grid.addWidget(QLabel("Current password"), 0, 0)
+        self.grid.addWidget(self.password, 0, 1)
+        self.password.setFocus()
+
+    def validate(self) -> str | None:
+        if not self.password.text():
+            return "Type the PDF's password."
+        self.result_params = {"password": self.password.text()}
+        return None
+
+
+SPEEDS = [(0.25, "¼× slow motion"), (0.5, "½× slower"), (1.5, "1.5× faster"), (2.0, "2× faster"),
+          (4.0, "4× time-lapse")]
+
+
+class SpeedPrompt(_Base):
+    def __init__(self, paths: list[Path]):
+        super().__init__("Change speed", paths[0].name if len(paths) == 1 else f"{len(paths)} files")
+        self.group = QButtonGroup(self)
+        for row, (factor, label) in enumerate(SPEEDS):
+            button = QRadioButton(label)
+            button.setProperty("factor", factor)
+            self.group.addButton(button)
+            self.grid.addWidget(button, row, 0, 1, 2)
+            if factor == 2.0:
+                button.setChecked(True)
+                button.setFocus()
+
+    def validate(self) -> str | None:
+        self.result_params = {"factor": float(self.group.checkedButton().property("factor"))}
+        return None
+
+
+PROMPTS = {"resize": ResizePrompt, "trim": TrimPrompt, "pages": PagesPrompt, "lock": LockPrompt,
+           "unlock": UnlockPrompt, "speed": SpeedPrompt}
 
 
 def ask(kind: str, paths: list[Path]) -> dict | None:

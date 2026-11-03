@@ -7,15 +7,16 @@ import json
 import logging
 import os
 import sys
+import time
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QPoint, QPointF, QRectF, Qt, QTimer
+from PySide6.QtCore import QObject, QPoint, QPointF, QRectF, QStandardPaths, Qt, QTimer
 from PySide6.QtGui import QAction, QColor, QCursor, QIcon, QPainter, QPainterPath, QPixmap
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 
-from . import winutil
+from . import history, winutil
 from .actions import Action
 from .config import APP_ID, ASSETS_DIR, LOG_FILE, VERSION, settings
 from .detector import DragDetector
@@ -27,6 +28,7 @@ from .ui import prompts
 from .ui.menu import ActionMenu
 from .ui.settings_window import SettingsWindow
 from .ui.toast import Toasts
+from .watcher import FolderWatcher
 
 log = logging.getLogger("satsuma")
 SERVER_NAME = f"satsuma-{getpass.getuser()}".replace(" ", "_")
@@ -92,9 +94,11 @@ class Satsuma(QObject):
         self.menu = ActionMenu()
         self.toasts = Toasts()
         self.runner = JobRunner(self)
+        self.watcher = FolderWatcher(self.runner, self)
         self.detector = DragDetector(self)
         self.settings_window: SettingsWindow | None = None
         self._last_outputs: list[Path] = []   # for "Undo" in the tray menu
+        self._titles: dict[int, str] = {}      # job id -> title, for Recent
         self.server: QLocalServer | None = None
 
         self.menu.chosen.connect(self.on_chosen)
@@ -102,6 +106,7 @@ class Satsuma(QObject):
 
         s = self.runner.signals
         s.started.connect(self.toasts.started)
+        s.started.connect(lambda job_id, title, _sub: self._titles.__setitem__(job_id, title))
         s.progress.connect(self.toasts.progress)
         s.finished.connect(self.toasts.finished)
         s.failed.connect(self.toasts.failed)
@@ -139,9 +144,15 @@ class Satsuma(QObject):
         self.enabled_action.toggled.connect(lambda v: settings.set("enabled", v))
         menu.addAction(self.enabled_action)
         menu.addAction("Open drop window", self.menu.open_pinned)
+        self.clipboard_action = QAction("Convert clipboard", menu)
+        self.clipboard_action.triggered.connect(self.convert_clipboard)
+        menu.addAction(self.clipboard_action)
+        menu.addSeparator()
+        self.recent_menu = menu.addMenu("Recent")
         self.undo_action = QAction("Undo last conversion", menu)
         self.undo_action.triggered.connect(self.undo_last)
         menu.addAction(self.undo_action)
+        menu.addSeparator()
         menu.addAction("Settings…", self.show_settings)
         menu.addSeparator()
         menu.addAction("Open log", lambda: open_file(LOG_FILE))
@@ -162,6 +173,60 @@ class Satsuma(QObject):
             self.undo_action.setText(f"Undo last conversion ({len(targets)} files)")
         else:
             self.undo_action.setText("Undo last conversion")
+        self._fill_recent()
+        what = self._clipboard_contents()
+        self.clipboard_action.setEnabled(what is not None)
+        self.clipboard_action.setText({"image": "Convert copied image",
+                                       "files": "Convert copied files"}.get(what, "Convert clipboard (nothing copied)"))
+
+    # ------------------------------------------------------------------ recent
+    def _fill_recent(self) -> None:
+        self.recent_menu.clear()
+        entries = history.entries()
+        if not entries:
+            empty = self.recent_menu.addAction("Nothing converted yet")
+            empty.setEnabled(False)
+            return
+        now = time.time()
+        for entry in entries:
+            outputs = [Path(o) for o in entry["outputs"]]
+            name = outputs[0].name if len(outputs) == 1 else f"{outputs[0].name} +{len(outputs) - 1} more"
+            label = f"{name}   ·   {history.ago(entry['time'], now)}"
+            action = self.recent_menu.addAction(label, lambda o=outputs[0]: reveal(o))
+            action.setToolTip(f"{entry.get('title', '')}\n{outputs[0]}")
+        self.recent_menu.addSeparator()
+        self.recent_menu.addAction("Clear this list", history.clear)
+
+    # ------------------------------------------------------------------ clipboard
+    @staticmethod
+    def _clipboard_paths() -> list[Path]:
+        data = QApplication.clipboard().mimeData()
+        if data is None or not data.hasUrls():
+            return []
+        return [Path(u.toLocalFile()) for u in data.urls() if u.isLocalFile() and Path(u.toLocalFile()).exists()]
+
+    def _clipboard_contents(self) -> str | None:
+        if self._clipboard_paths():
+            return "files"
+        data = QApplication.clipboard().mimeData()
+        return "image" if data is not None and data.hasImage() else None
+
+    def convert_clipboard(self) -> None:
+        """Open the ring for copied files, or for a copied picture saved as a PNG first."""
+        paths = self._clipboard_paths()
+        if not paths:
+            image = QApplication.clipboard().image()
+            if image.isNull():
+                return
+            pictures = QStandardPaths.writableLocation(QStandardPaths.PicturesLocation) or str(Path.home())
+            folder = Path(pictures) / "Satsuma clipboard"
+            folder.mkdir(parents=True, exist_ok=True)
+            path = folder / time.strftime("Clipboard %Y-%m-%d %H.%M.%S.png")
+            if not image.save(str(path), "PNG"):
+                self.tray.showMessage("Satsuma", "Couldn't save the copied picture.", app_icon(), 5000)
+                return
+            paths = [path]
+        self.menu.open_for(paths, QCursor.pos())
 
     def undo_last(self) -> None:
         """Send the last job's results to the Recycle Bin (same as Undo on its card)."""
@@ -253,8 +318,9 @@ class Satsuma(QObject):
         if params is not None:
             self.runner.submit(action, paths, params)
 
-    def on_finished(self, _job_id: int, outputs: list) -> None:
+    def on_finished(self, job_id: int, outputs: list) -> None:
         self._last_outputs = [Path(o) for o in outputs]
+        history.add(self._titles.pop(job_id, ""), outputs)
         if settings.get("reveal_after") and outputs:
             reveal(outputs[0])
 
@@ -289,6 +355,7 @@ class Satsuma(QObject):
 
     def quit(self) -> None:
         self.detector.stop()
+        self.watcher.stop()
         self.tray.hide()
         if self.server:
             self.server.close()

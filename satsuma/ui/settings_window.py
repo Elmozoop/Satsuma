@@ -7,13 +7,14 @@ from pathlib import Path
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt, QThread, QUrl, Signal
 from PySide6.QtGui import QColor, QDesktopServices, QFont, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (QAbstractItemView, QButtonGroup, QColorDialog, QComboBox, QDialog,
+                               QDialogButtonBox,
                                QFileDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
                                QListWidget, QListWidgetItem, QMessageBox, QProgressBar, QPushButton,
                                QScrollArea, QSlider, QSpinBox, QStackedWidget, QStyle,
                                QStyledItemDelegate, QStyleOptionViewItem, QToolButton, QVBoxLayout,
                                QWidget)
 
-from .. import winutil
+from .. import watcher, winutil
 from ..actions import catalogue, is_shown
 from ..config import BIN_DIR, DATA_DIR, DEFAULTS, LOG_FILE, VERSION, settings
 from ..engine import documents
@@ -27,7 +28,8 @@ from .theme import ACCENT_PRESETS, palette, readable_on
 LOOK_KEYS = ["theme", "accent", "menu_scale", "glass_opacity", "anim_speed", "bounce", "show_icons",
              "show_captions", "hub_info", "wedges_per_ring", "hub_switch_ms", "start_page"]
 PROJECT_URL = "https://github.com/Elmozoop/Satsuma"
-PAGES = ["Appearance", "Ring actions", "Trigger", "Saving", "Converters", "About"]
+PAGES = ["Appearance", "Ring actions", "Trigger", "Saving", "Watched folders", "Converters", "About"]
+WATCH_PAGE = PAGES.index("Watched folders")
 RESTYLE_KEYS = {"theme", "accent", "*"}
 
 
@@ -282,7 +284,7 @@ class SettingsWindow(QDialog):
 
     def _build_pages(self) -> None:
         builders = [self._appearance_page, self._actions_page, self._trigger_page,
-                    self._saving_page, self._converters_page, self._about_page]
+                    self._saving_page, self._watch_page, self._converters_page, self._about_page]
         for build in builders:
             self.stack.addWidget(build())
 
@@ -713,6 +715,85 @@ class SettingsWindow(QDialog):
         if folder:
             self.custom.setText(folder)
             settings.set("output_custom", folder)
+
+    # ================================================================== Watched folders
+    def _watch_page(self) -> QWidget:
+        scroll, layout = self._page(
+            "Watched folders",
+            "Satsuma runs an action on every new file that lands in these folders, like turning "
+            "screenshots into WEBP. Files already there are left alone, and Satsuma never re-processes "
+            "its own results.")
+        card = self._section(layout, "Folders")
+        rules = list(settings.get("watch_rules") or [])
+        if not rules:
+            card.add("No watched folders yet", "Add one below.")
+        for index, rule in enumerate(rules):
+            folder = Path(str(rule.get("folder", "")))
+            hint = f"→ {watcher.describe(str(rule.get('action', '')))}"
+            if not folder.is_dir():
+                hint += "   ·   folder not found"
+            controls = QWidget()
+            row_layout = QHBoxLayout(controls)
+            row_layout.setContentsMargins(0, 0, 0, 0)
+            toggle = Toggle(bool(rule.get("enabled", True)))
+            toggle.setToolTip("Watch this folder")
+            toggle.toggled.connect(lambda on, i=index: self._edit_rule(i, enabled=on))
+            remove = QPushButton("Remove")
+            remove.clicked.connect(lambda _c=False, i=index: self._edit_rule(i, remove=True))
+            row_layout.addWidget(toggle)
+            row_layout.addWidget(remove)
+            card.add(folder.name or str(folder), f"{folder}\n{hint}", controls)
+        add = QPushButton("Add a folder…")
+        add.setObjectName("primary")
+        add.clicked.connect(self._add_rule)
+        layout.addSpacing(8)
+        layout.addWidget(add, alignment=Qt.AlignLeft)
+        layout.addStretch(1)
+        return scroll
+
+    def _edit_rule(self, index: int, enabled: bool | None = None, remove: bool = False) -> None:
+        rules = [dict(r) for r in (settings.get("watch_rules") or [])]
+        if not 0 <= index < len(rules):
+            return
+        if remove:
+            rules.pop(index)
+        else:
+            rules[index]["enabled"] = bool(enabled)
+        settings.set("watch_rules", rules)
+        if remove:
+            self._refresh_page(WATCH_PAGE, self._watch_page)
+
+    def _add_rule(self) -> None:
+        folder = QFileDialog.getExistingDirectory(self, "Watch which folder?")
+        if not folder:
+            return
+        dialog = QDialog(self)
+        dialog.setWindowTitle("What should happen to new files?")
+        box = QVBoxLayout(dialog)
+        box.addWidget(QLabel(f"New files in <b>{Path(folder).name}</b>:"))
+        choice = QComboBox()
+        for label, _category, action in watcher.watchable_actions():
+            caption = f" ({action.caption})" if action.caption else ""
+            choice.addItem(f"{label}: {action.label}{caption}", action.id)
+        box.addWidget(choice)
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        box.addWidget(buttons)
+        dialog.setStyleSheet(stylesheet())
+        if dialog.exec() != QDialog.Accepted:
+            return
+        rules = [dict(r) for r in (settings.get("watch_rules") or [])]
+        rules.append({"folder": str(Path(folder)), "action": choice.currentData(), "enabled": True})
+        settings.set("watch_rules", rules)
+        self._refresh_page(WATCH_PAGE, self._watch_page)
+
+    def _refresh_page(self, index: int, build) -> None:
+        old = self.stack.widget(index)
+        self.stack.insertWidget(index, build())
+        self.stack.removeWidget(old)
+        old.deleteLater()
+        self.stack.setCurrentIndex(index)
 
     # ================================================================== Converters
     def _converters_page(self) -> QWidget:

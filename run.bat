@@ -9,15 +9,19 @@ if not defined PY where python >nul 2>nul && set "PY=python"
 if not defined PY goto :nopython
 %PY% -c "import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)" >nul 2>nul || goto :nopython
 
-rem ---- first run: private virtual environment with the requirements --------
-if not exist ".venv\installed.ok" (
-    echo Setting up Satsuma for the first time. This takes a minute or two...
+rem ---- private virtual environment with the requirements ---------------------
+rem installed.ok holds a copy of requirements.txt: when an update changes the list, install again.
+set "SETUP="
+if not exist ".venv\installed.ok" set "SETUP=1"
+if not defined SETUP fc /b requirements.txt ".venv\installed.ok" >nul 2>nul || set "SETUP=1"
+if defined SETUP (
+    echo Setting up Satsuma. This takes a minute or two...
     if not exist ".venv\Scripts\python.exe" (
         %PY% -m venv .venv || goto :failed
     )
     ".venv\Scripts\python.exe" -m pip install --upgrade pip --disable-pip-version-check -q
     ".venv\Scripts\python.exe" -m pip install -r requirements.txt --disable-pip-version-check || goto :failed
-    echo ok> ".venv\installed.ok"
+    copy /y requirements.txt ".venv\installed.ok" >nul
 )
 
 if /i "%~1"=="--setup-only" exit /b 0
