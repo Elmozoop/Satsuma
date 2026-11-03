@@ -171,6 +171,10 @@ class Settings:
     def subscribe(self, listener) -> None:
         self._listeners.append(listener)
 
+    def unsubscribe(self, listener) -> None:
+        if listener in self._listeners:
+            self._listeners.remove(listener)
+
     def reset(self, keys) -> None:
         for key in keys:
             self._data[key] = DEFAULTS[key] if not isinstance(DEFAULTS[key], (list, dict)) else type(DEFAULTS[key])()

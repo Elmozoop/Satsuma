@@ -5,16 +5,32 @@ Actions with `prompt` set ask the user for parameters after the drop.
 """
 from __future__ import annotations
 
+import importlib
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
 from . import filetypes as ft
-from .engine import archives, documents, images, media, pdfs
+from .engine import archives, documents, media
 from .engine import ffmpeg_tool as ff
 
 Progress = Callable[[float, str], None]
+
+
+class _Lazy:
+    """Imports an engine module on first use. Pillow and the PDF libraries cost ~30 MB,
+    which a tray app idling in the background shouldn't carry until a job needs them."""
+
+    def __init__(self, name: str):
+        self._name = name
+
+    def __getattr__(self, attr: str):
+        return getattr(importlib.import_module(self._name), attr)
+
+
+images = _Lazy("satsuma.engine.images")
+pdfs = _Lazy("satsuma.engine.pdfs")
 
 
 @dataclass(frozen=True)

@@ -337,6 +337,12 @@ class RadialView:
             self._paths_cache.clear()
             self._fonts.clear()
 
+    def release(self) -> None:
+        """Drop the sprites while nothing is on screen; the next paint rebuilds them."""
+        self._style_key = None
+        self._sprites.clear()
+        self._paths_cache.clear()
+
     @staticmethod
     def _canvas(bounds: QRectF, dpr: float) -> tuple[QPixmap, QPainter]:
         pixmap = QPixmap(max(1, math.ceil(bounds.width() * dpr)), max(1, math.ceil(bounds.height() * dpr)))

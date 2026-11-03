@@ -31,6 +31,11 @@ if IS_WINDOWS:
     _user32.GetSystemMetrics.restype = ctypes.c_int
     _user32.AllowSetForegroundWindow.argtypes = [wintypes.DWORD]
     _user32.AllowSetForegroundWindow.restype = wintypes.BOOL
+    _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    _kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+    _kernel32.SetProcessWorkingSetSizeEx.argtypes = [wintypes.HANDLE, ctypes.c_size_t,
+                                                     ctypes.c_size_t, wintypes.DWORD]
+    _kernel32.SetProcessWorkingSetSizeEx.restype = wintypes.BOOL
 
 
 def key_down(vk: int) -> bool:
@@ -51,6 +56,17 @@ def allow_foreground_for_others() -> None:
     if IS_WINDOWS:
         try:
             _user32.AllowSetForegroundWindow(0xFFFFFFFF)  # ASFW_ANY
+        except Exception:
+            pass
+
+
+def trim_working_set() -> None:
+    """Hand idle memory back to Windows. Pages come back on their own when next touched."""
+    if IS_WINDOWS:
+        try:
+            # (size_t)-1 for both limits means "remove as many pages as possible".
+            _kernel32.SetProcessWorkingSetSizeEx(_kernel32.GetCurrentProcess(),
+                                                 ctypes.c_size_t(-1).value, ctypes.c_size_t(-1).value, 0)
         except Exception:
             pass
 

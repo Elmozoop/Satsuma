@@ -1,6 +1,7 @@
 """Application wiring: tray icon, single instance, detector → menu → jobs → toasts."""
 from __future__ import annotations
 
+import gc
 import getpass
 import json
 import logging
@@ -29,6 +30,7 @@ from .ui.toast import Toasts
 
 log = logging.getLogger("satsuma")
 SERVER_NAME = f"satsuma-{getpass.getuser()}".replace(" ", "_")
+IDLE_TRIM_MS = 20_000  # quiet this long (nothing on screen, no jobs) → give memory back
 
 
 def setup_logging() -> None:
@@ -109,8 +111,16 @@ class Satsuma(QObject):
         self.detector.released.connect(self.menu.released)
         self.detector.disarmed.connect(self.menu.disarm)
 
+        self._idle = QTimer(self)
+        self._idle.setSingleShot(True)
+        self._idle.setInterval(IDLE_TRIM_MS)
+        self._idle.timeout.connect(self._trim_if_idle)
+        for signal in (self.menu.closed, s.finished, s.failed):
+            signal.connect(self._idle.start)
+
         self._build_tray()
         self.detector.start()
+        self._idle.start()
 
     # ------------------------------------------------------------------ tray
     def _build_tray(self) -> None:
@@ -220,9 +230,31 @@ class Satsuma(QObject):
     def show_settings(self) -> None:
         if self.settings_window is None:
             self.settings_window = SettingsWindow()
+            self.settings_window.finished.connect(self._settings_closed)
         self.settings_window.show()
         self.settings_window.raise_()
         self.settings_window.activateWindow()
+
+    def _settings_closed(self) -> None:
+        # Settings is opened rarely: free it rather than keep ~10 MB of widgets around.
+        window = self.settings_window
+        if window is None or window.busy:   # an FFmpeg download still reports to it
+            return
+        self.settings_window = None
+        window.deleteLater()
+        self._idle.start()
+
+    # ------------------------------------------------------------------ memory
+    def _trim_if_idle(self) -> None:
+        if self.settings_window is not None and not self.settings_window.isVisible():
+            self._settings_closed()   # closed mid-download; free it once the download is over
+        busy = (self.menu.isVisible() or self.toasts.isVisible() or self.settings_window is not None
+                or self.runner.pool.activeThreadCount() > 0 or QApplication.activePopupWidget())
+        if busy:
+            self._idle.start()   # try again later
+            return
+        gc.collect()
+        winutil.trim_working_set()
 
     def quit(self) -> None:
         self.detector.stop()

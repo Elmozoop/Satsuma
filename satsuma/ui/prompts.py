@@ -9,7 +9,6 @@ from PySide6.QtWidgets import (QButtonGroup, QDialog, QDialogButtonBox, QGridLay
                                QLineEdit, QRadioButton, QSpinBox, QVBoxLayout)
 
 from ..engine import ffmpeg_tool as ff
-from ..engine import images, pdfs
 
 
 def parse_time(text: str) -> float | None:
@@ -72,6 +71,8 @@ class ResizePrompt(_Base):
     def __init__(self, paths: list[Path]):
         subtitle = paths[0].name if len(paths) == 1 else f"{len(paths)} images"
         try:
+            from ..engine import images  # loaded on demand: Pillow is large
+
             meta = images.info(paths[0])
             self.size = (meta["width"], meta["height"])
             subtitle += f" · {meta['width']}×{meta['height']}"
@@ -150,6 +151,8 @@ class TrimPrompt(_Base):
 class PagesPrompt(_Base):
     def __init__(self, paths: list[Path]):
         try:
+            from ..engine import pdfs  # loaded on demand: the PDF libraries are large
+
             self.count = min(pdfs.page_count(p) for p in paths)
         except Exception:
             self.count = 9999

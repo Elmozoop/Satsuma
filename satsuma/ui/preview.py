@@ -1,7 +1,9 @@
 """Live, interactive preview of the radial menu for the Settings window."""
 from __future__ import annotations
 
+import shutil
 import tempfile
+from functools import partial
 from pathlib import Path
 
 from PySide6.QtCore import QPointF, QSize, Qt, QTimer
@@ -19,6 +21,11 @@ SAMPLES = {"image": ("Holiday photo.png", 2_400_000), "video": ("Screen recordin
 LAYOUT_KEYS = {"menu_scale", "wedges_per_ring", "start_page", "actions_hidden", "actions_order",
                "show_icons", "hub_info", "show_captions", "*"}
 REPLAY_KEYS = {"anim_speed", "bounce", "menu_scale", "*"}
+
+
+def _release(listener, folder: Path, *_args) -> None:
+    settings.unsubscribe(listener)
+    shutil.rmtree(folder, ignore_errors=True)
 
 
 class RadialPreview(QWidget):
@@ -39,6 +46,8 @@ class RadialPreview(QWidget):
         self._demo.setInterval(1100)
         self._demo.timeout.connect(self._demo_step)
         settings.subscribe(self._on_setting)
+        # The settings window is freed when closed: stop listening and drop the sample files.
+        self.destroyed.connect(partial(_release, self._on_setting, self._dir))
         self.set_kind("image")
         self._demo.start()
 

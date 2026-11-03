@@ -184,6 +184,7 @@ class ActionMenu(QWidget):
         self.mode = "hidden"
         self.view.set_hover(None)
         self.view.opening.snap(0.0)
+        self.view.release()
         self.hide()
         self.closed.emit()
 

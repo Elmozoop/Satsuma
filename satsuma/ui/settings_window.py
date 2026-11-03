@@ -120,6 +120,11 @@ class SettingsWindow(QDialog):
         root.addWidget(footer, alignment=Qt.AlignRight)
         self._fetcher: _FFmpegFetcher | None = None
 
+    @property
+    def busy(self) -> bool:
+        """True while a background FFmpeg download still reports to this window."""
+        return bool(self._fetcher and self._fetcher.isRunning())
+
     # ================================================================== Look & feel
     def _look_tab(self) -> QWidget:
         tab = QWidget()

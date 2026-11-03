@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import itertools
 import logging
+import sys
 import traceback
 from pathlib import Path
 
@@ -10,14 +11,19 @@ from PySide6.QtCore import QObject, QRunnable, QThreadPool, Signal
 
 from .actions import Action, ensure_requirements
 from .engine.ffmpeg_tool import Cancelled, ConversionError, FFmpegMissing
-from .engine.pdfs import PdfLocked
 
 log = logging.getLogger(__name__)
 _ids = itertools.count(1)
 
 # Errors whose message is already written for people.
-FRIENDLY = (ConversionError, FFmpegMissing, Cancelled, PdfLocked, ValueError, PermissionError,
+FRIENDLY = (ConversionError, FFmpegMissing, Cancelled, ValueError, PermissionError,
             FileNotFoundError)
+
+
+def _pdf_locked(exc: BaseException) -> bool:
+    # Only look if the PDF engine was loaded; importing it here would cost memory for nothing.
+    pdfs = sys.modules.get("satsuma.engine.pdfs")
+    return pdfs is not None and isinstance(exc, pdfs.PdfLocked)
 
 
 def friendly_error(exc: BaseException) -> str:
@@ -25,7 +31,7 @@ def friendly_error(exc: BaseException) -> str:
         return "Windows blocked access to the file. Is it open in another app?"
     if isinstance(exc, FileNotFoundError):
         return "The file no longer exists."
-    if isinstance(exc, FRIENDLY):
+    if isinstance(exc, FRIENDLY) or _pdf_locked(exc):
         return str(exc) or exc.__class__.__name__
     if isinstance(exc, OSError) and getattr(exc, "winerror", None) == 112:
         return "The disk is full."
