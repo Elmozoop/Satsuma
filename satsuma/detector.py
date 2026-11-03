@@ -1,6 +1,7 @@
 """Notices a modifier-held drag anywhere on the desktop.
 
-Polls the physical button and modifier state every 15 ms with GetAsyncKeyState.
+Polls the physical button and modifier state with GetAsyncKeyState: every 60 ms while
+the mouse button is up, every 15 ms from the moment it goes down until it is released.
 Polling (rather than a low-level mouse hook) cannot slow down the user's mouse and
 cannot be silently unhooked by Windows when the app is busy.
 
@@ -19,7 +20,8 @@ from PySide6.QtWidgets import QApplication
 from . import winutil
 from .config import settings
 
-POLL_MS = 15
+POLL_MS = 15        # while a button is down: smooth tracking of the drag
+IDLE_POLL_MS = 60   # while idle: a press is still caught long before a drag can arm
 
 
 class DragDetector(QObject):
@@ -36,7 +38,7 @@ class DragDetector(QObject):
         # The app replaces this so we can ask whether the menu has revealed itself.
         self.is_revealed = lambda: False
         self._timer = QTimer(self)
-        self._timer.setInterval(POLL_MS)
+        self._timer.setInterval(IDLE_POLL_MS)
         self._timer.timeout.connect(self._poll)
 
     @property
@@ -56,6 +58,13 @@ class DragDetector(QObject):
         return widget is not None
 
     def _poll(self) -> None:
+        self._step()
+        # Poll fast only while something may be happening; idle checks cost far less CPU.
+        interval = IDLE_POLL_MS if self.state == "idle" else POLL_MS
+        if self._timer.interval() != interval:
+            self._timer.setInterval(interval)
+
+    def _step(self) -> None:
         if not settings.get("enabled"):
             if self.state == "armed":
                 self.released.emit()

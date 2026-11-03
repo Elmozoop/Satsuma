@@ -39,6 +39,49 @@ _running: set = set()
 _running_lock = threading.Lock()
 
 
+class CancelToken:
+    """Lets the UI stop one job: any ffmpeg it is running is killed straight away,
+    and the job's own code calls `check()` between steps."""
+
+    def __init__(self):
+        self.cancelled = False
+        self._processes: set = set()
+        self._lock = threading.Lock()
+
+    def cancel(self) -> None:
+        with self._lock:
+            self.cancelled = True
+            processes = list(self._processes)
+        for process in processes:
+            try:
+                process._satsuma_cancelled = True
+                process.kill()
+            except OSError:
+                pass
+
+    def check(self) -> None:
+        if self.cancelled:
+            raise Cancelled("Cancelled.")
+
+    def _track(self, process, running: bool) -> None:
+        with self._lock:
+            if running:
+                self._processes.add(process)
+            else:
+                self._processes.discard(process)
+
+
+@contextmanager
+def cancel_scope(token: CancelToken):
+    """Within this block, ffmpeg runs on this thread can be stopped through `token`."""
+    previous = getattr(_local, "token", None)
+    _local.token = token
+    try:
+        yield
+    finally:
+        _local.token = previous
+
+
 @contextmanager
 def progress_scope(callback):
     """Within this block, ffmpeg runs on this thread report fraction 0..1 to `callback`."""
@@ -60,6 +103,20 @@ def terminate_all() -> None:
             process.kill()
         except OSError:
             pass
+
+
+def _remove_partial_output(args: list[str]) -> None:
+    """Delete the half-written file a stopped ffmpeg leaves behind (always the last argument)."""
+    if not args:
+        return
+    inputs = {args[i + 1] for i, a in enumerate(args[:-1]) if a == "-i"}
+    output = args[-1]
+    if output in inputs or output.startswith("-"):
+        return
+    try:
+        Path(output).unlink(missing_ok=True)
+    except OSError:
+        pass
 
 
 def _expected_duration(args: list[str]) -> float:
@@ -187,6 +244,9 @@ def run(args: list[str], timeout: int = 3600) -> str:
     if binary is None:
         raise FFmpegMissing("ffmpeg is not available.")
     callback = getattr(_local, "callback", None)
+    token: CancelToken | None = getattr(_local, "token", None)
+    if token:
+        token.check()
     total = _expected_duration(args) if callback else 0.0
     command = [str(binary), "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
                "-progress", "pipe:1", "-nostats", *args]
@@ -201,6 +261,11 @@ def run(args: list[str], timeout: int = 3600) -> str:
             raise ConversionError(f"Could not start FFmpeg: {exc}") from exc
         with _running_lock:
             _running.add(process)
+        if token:
+            token._track(process, True)
+            if token.cancelled:          # cancelled while it was starting
+                process._satsuma_cancelled = True
+                process.kill()
         timed_out = threading.Event()
 
         def on_timeout(proc=process):
@@ -222,11 +287,21 @@ def run(args: list[str], timeout: int = 3600) -> str:
             process.wait()
         finally:
             timer.cancel()
+            if process.poll() is None:   # left the loop early (an exception): don't leave it running
+                process.kill()
+                process.wait()
             with _running_lock:
                 _running.discard(process)
+            if token:
+                token._track(process, False)
         if process.returncode != 0:
+            stopped = getattr(process, "_satsuma_cancelled", False) or getattr(process, "_satsuma_killed", False)
+            if stopped or timed_out.is_set():
+                _remove_partial_output(args)
             if timed_out.is_set():
                 raise ConversionError("FFmpeg timed out.")
+            if getattr(process, "_satsuma_cancelled", False):
+                raise Cancelled("Cancelled.")
             if getattr(process, "_satsuma_killed", False):
                 raise Cancelled("Stopped because Satsuma was closed.")
             errors.seek(0)

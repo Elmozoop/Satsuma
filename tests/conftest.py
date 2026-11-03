@@ -8,6 +8,10 @@ _DATA = tempfile.mkdtemp(prefix="satsuma-test-")
 os.environ["LOCALAPPDATA"] = _DATA
 os.environ["XDG_DATA_HOME"] = _DATA
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+if sys.platform == "win32":
+    # Offscreen Qt only looks in its own fonts folder, which PySide6 doesn't ship on Windows:
+    # without this it has no fonts at all and renders text (e.g. text → PDF) as nothing.
+    os.environ.setdefault("QT_QPA_FONTDIR", os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "Fonts"))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import pytest  # noqa: E402

@@ -1,12 +1,13 @@
-"""Bottom-right stack of job cards: progress, then Open / Show in folder."""
+"""Bottom-right stack of job cards: progress and Cancel, then Open / Show in folder / Undo."""
 from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QPoint, QPointF, QRectF, Qt, QTimer
+from PySide6.QtCore import QPoint, QPointF, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QGuiApplication, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QWidget
 
+from .. import winutil
 from ..engine.paths import human_size, open_file, reveal
 from .anim import FrameClock, Spring
 from .theme import palette, ui_font
@@ -25,7 +26,7 @@ class Card:
         self.subtitle = subtitle
         self.message = "Starting…"
         self.fraction = 0.0
-        self.state = "running"   # running | done | failed
+        self.state = "running"   # running | cancelling | done | failed | cancelled | undone
         self.outputs: list[Path] = []
         self.buttons: list[tuple[QRectF, str]] = []
         self.close_rect = QRectF()
@@ -37,6 +38,8 @@ class Card:
 
 
 class Toasts(QWidget):
+    cancel_requested = Signal(int)   # job id
+
     def __init__(self):
         super().__init__(None)
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool
@@ -125,6 +128,30 @@ class Toasts(QWidget):
         card.expire_ms = 8000
         self._relayout()
 
+    def cancelled(self, job_id: int) -> None:
+        card = self._card(job_id)
+        if not card:
+            return
+        card.state = "cancelled"
+        card.message = "Cancelled"
+        card.expire_ms = 4000
+        self._relayout()
+
+    def _cancel(self, card: Card) -> None:
+        card.state = "cancelling"
+        card.message = "Cancelling…"
+        self.cancel_requested.emit(card.id)
+        self.update()
+
+    def _undo(self, card: Card) -> None:
+        if winutil.recycle(card.outputs):
+            card.state = "undone"
+            card.message = "Moved to the Recycle Bin"
+        else:
+            card.message = "Couldn't move it to the Recycle Bin"
+        card.expire_ms = 4000
+        self.update()
+
     def failed(self, job_id: int, message: str) -> None:
         card = self._card(job_id)
         if not card:
@@ -152,7 +179,7 @@ class Toasts(QWidget):
         if self._hovered:
             return
         for card in list(self.cards):
-            if card.state != "running" and not card.leaving:
+            if card.state not in ("running", "cancelling") and not card.leaving:
                 card.expire_ms -= self._tick.interval()
                 if card.expire_ms <= 0:
                     self._remove(card)
@@ -185,12 +212,17 @@ class Toasts(QWidget):
                 self._remove(card)
                 return
             for rect, name in card.buttons:
-                if rect.contains(event.position()) and card.outputs:
-                    if name == "open":
-                        open_file(card.outputs[0])
-                    else:
-                        reveal(card.outputs[0])
-                    return
+                if not rect.contains(event.position()):
+                    continue
+                if name == "cancel" and card.state == "running":
+                    self._cancel(card)
+                elif name == "undo" and card.state == "done":
+                    self._undo(card)
+                elif name == "open" and card.outputs:
+                    open_file(card.outputs[0])
+                elif name == "reveal" and card.outputs:
+                    reveal(card.outputs[0])
+                return
 
     # ----------------------------------------------------------------- paint
     def paintEvent(self, _event) -> None:
@@ -220,7 +252,8 @@ class Toasts(QWidget):
         painter.setPen(QPen(pal.border, 1))
         painter.drawPath(path)
 
-        status_color = {"running": pal.accent, "done": pal.success, "failed": pal.danger}[card.state]
+        status_color = {"running": pal.accent, "cancelling": pal.muted, "done": pal.success,
+                        "failed": pal.danger, "cancelled": pal.muted, "undone": pal.muted}[card.state]
         painter.setPen(Qt.NoPen)
         painter.setBrush(status_color)
         painter.drawEllipse(QRectF(rect.left() + 14, rect.top() + 17, 8, 8))
@@ -234,7 +267,7 @@ class Toasts(QWidget):
 
         painter.setFont(ui_font(8.4))
         painter.setPen(pal.danger if card.state == "failed" else pal.muted)
-        line = card.message if card.state != "running" else f"{card.subtitle} — {card.message}"
+        line = f"{card.subtitle} — {card.message}" if card.state in ("running", "cancelling") else card.message
         line = QFontMetrics(painter.font()).elidedText(line, Qt.ElideMiddle, int(rect.width() - 44))
         painter.drawText(QRectF(rect.left() + 30, rect.top() + 30, rect.width() - 44, 18),
                          Qt.AlignLeft | Qt.AlignVCenter, line)
@@ -248,8 +281,10 @@ class Toasts(QWidget):
 
         card.buttons = []
         bottom = rect.bottom() - 14
-        if card.state == "running":
-            track = QRectF(rect.left() + 30, bottom - 2, rect.width() - 50, 4)
+        if card.state in ("running", "cancelling"):
+            if card.state == "running":
+                self._button(painter, card, "cancel", "Cancel", rect.right() - 14, bottom, pal, right=True)
+            track = QRectF(rect.left() + 30, bottom - 2, rect.width() - 112, 4)
             painter.setPen(Qt.NoPen)
             painter.setBrush(pal.tile)
             painter.drawRoundedRect(track, 2, 2)
@@ -262,17 +297,25 @@ class Toasts(QWidget):
             labels = [("open", "Open"), ("reveal", "Show in folder")]
             if card.outputs[0].is_dir():
                 labels = [("open", "Open folder")]
-            painter.setFont(ui_font(8.2, QFont.DemiBold))
             for name, text in labels:
-                width = QFontMetrics(painter.font()).horizontalAdvance(text) + 18
-                button = QRectF(x, bottom - BTN_H + 6, width, BTN_H)
-                hovered = self.hover_button == (card.id, name)
-                fill = QColor(pal.accent)
-                fill.setAlpha(255 if hovered else 34)
-                painter.setPen(Qt.NoPen)
-                painter.setBrush(fill)
-                painter.drawRoundedRect(button, 6, 6)
-                painter.setPen(pal.on_accent if hovered else pal.accent)
-                painter.drawText(button, Qt.AlignCenter, text)
-                card.buttons.append((button, name))
-                x += width + 6
+                x = self._button(painter, card, name, text, x, bottom, pal) + 6
+            self._button(painter, card, "undo", "Undo", rect.right() - 14, bottom, pal, right=True, quiet=True)
+
+    def _button(self, painter: QPainter, card: Card, name: str, text: str, x: float, bottom: float, pal,
+                right: bool = False, quiet: bool = False) -> float:
+        """Draw a pill button starting at x (or ending at x when `right`); returns its right edge."""
+        painter.setFont(ui_font(8.2, QFont.DemiBold))
+        width = QFontMetrics(painter.font()).horizontalAdvance(text) + 18
+        left = x - width if right else x
+        button = QRectF(left, bottom - BTN_H + 6, width, BTN_H)
+        hovered = self.hover_button == (card.id, name)
+        tint = pal.muted if quiet else pal.accent
+        fill = QColor(tint)
+        fill.setAlpha(255 if hovered else 34)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(fill)
+        painter.drawRoundedRect(button, 6, 6)
+        painter.setPen((pal.on_accent if not quiet else pal.panel) if hovered else (pal.text if quiet else tint))
+        painter.drawText(button, Qt.AlignCenter, text)
+        card.buttons.append((button, name))
+        return button.right()

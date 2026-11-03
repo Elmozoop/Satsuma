@@ -71,6 +71,36 @@ def trim_working_set() -> None:
             pass
 
 
+def recycle(paths) -> bool:
+    """Send files or folders to the Recycle Bin (restorable). True if all of them went."""
+    paths = [Path(p) for p in paths if Path(p).exists()]
+    if not paths:
+        return True
+    if not IS_WINDOWS:
+        return False
+
+    class SHFILEOPSTRUCTW(ctypes.Structure):
+        _fields_ = [("hwnd", wintypes.HWND), ("wFunc", wintypes.UINT), ("pFrom", wintypes.LPCWSTR),
+                    ("pTo", wintypes.LPCWSTR), ("fFlags", ctypes.c_ushort),
+                    ("fAnyOperationsAborted", wintypes.BOOL), ("hNameMappings", ctypes.c_void_p),
+                    ("lpszProgressTitle", wintypes.LPCWSTR)]
+
+    FO_DELETE, FOF_SILENT, FOF_NOCONFIRMATION, FOF_ALLOWUNDO, FOF_NOERRORUI = 3, 0x4, 0x10, 0x40, 0x400
+    # The list is NUL-separated and ends with two NULs.
+    files = "\0".join(os.path.abspath(str(p)) for p in paths) + "\0\0"
+    op = SHFILEOPSTRUCTW(None, FO_DELETE, files, None,
+                         FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT | FOF_NOERRORUI, False, None, None)
+    try:
+        result = ctypes.windll.shell32.SHFileOperationW(ctypes.byref(op))
+    except Exception as exc:
+        log.warning("recycle failed: %s", exc)
+        return False
+    if result != 0 or op.fAnyOperationsAborted:
+        log.warning("recycle failed: code %s", result)
+        return False
+    return not any(p.exists() for p in paths)
+
+
 def launch_command() -> tuple[str, list[str]]:
     """(program, args) that start this app the same way it is running now."""
     if getattr(sys, "frozen", False):

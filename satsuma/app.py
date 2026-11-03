@@ -104,7 +104,9 @@ class Satsuma(QObject):
         s.progress.connect(self.toasts.progress)
         s.finished.connect(self.toasts.finished)
         s.failed.connect(self.toasts.failed)
+        s.cancelled.connect(self.toasts.cancelled)
         s.finished.connect(self.on_finished)
+        self.toasts.cancel_requested.connect(self.runner.cancel)
 
         self.detector.armed.connect(lambda pos: self.menu.arm(pos, smart=bool(settings.get("smart_detect"))))
         self.detector.moved.connect(self.on_moved)
@@ -115,7 +117,7 @@ class Satsuma(QObject):
         self._idle.setSingleShot(True)
         self._idle.setInterval(IDLE_TRIM_MS)
         self._idle.timeout.connect(self._trim_if_idle)
-        for signal in (self.menu.closed, s.finished, s.failed):
+        for signal in (self.menu.closed, s.finished, s.failed, s.cancelled):
             signal.connect(self._idle.start)
 
         self._build_tray()

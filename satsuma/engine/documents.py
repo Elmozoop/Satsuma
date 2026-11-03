@@ -232,7 +232,11 @@ def _text_to_pdf(source: Path) -> Path:
 
 def _render_text_pdf(source: Path) -> Path:
     from PySide6.QtCore import QMarginsF, QSizeF
-    from PySide6.QtGui import QFont, QPageLayout, QPageSize, QPdfWriter, QTextDocument
+    from PySide6.QtGui import QFont, QFontDatabase, QPageLayout, QPageSize, QPdfWriter, QTextDocument
+
+    if not QFontDatabase.families():
+        # Qt would quietly write pages with no text on them.
+        raise ConversionError("No fonts are available to lay out the text.")
 
     raw = source.read_bytes()
     text = None
