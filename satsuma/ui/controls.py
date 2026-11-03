@@ -197,11 +197,13 @@ def stylesheet() -> str:
                                    selection-background-color: {acc_soft}; selection-color: {text};
                                    outline: none; padding: 4px; }}
 
+    QSlider {{ min-height: 24px; background: transparent; }}
     QSlider::groove:horizontal {{ height: 4px; border-radius: 2px; background: {_rgba(QColor(text), 0.18)}; }}
     QSlider::sub-page:horizontal {{ height: 4px; border-radius: 2px; background: {acc}; }}
+    /* 18 px handle inside a 24 px slider: never clipped. No hover change, so it can't flicker mid-drag. */
     QSlider::handle:horizontal {{ width: 12px; height: 12px; margin: -7px 0; border-radius: 9px;
                                   background: {field}; border: 3px solid {acc}; }}
-    QSlider::handle:horizontal:hover {{ background: {acc}; }}
+    QSlider::handle:horizontal:pressed {{ border-width: 4px; width: 10px; height: 10px; }}
 
     QListWidget#actions {{ background: {card}; border: 1px solid {line}; border-radius: 10px;
                            padding: 4px; outline: none; }}
