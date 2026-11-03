@@ -8,7 +8,7 @@ from PySide6.QtGui import QColor, QFont, QFontMetrics, QGuiApplication, QPainter
 from PySide6.QtWidgets import QWidget
 
 from .. import winutil
-from ..engine.paths import human_size, open_file, reveal
+from ..engine.paths import human_size, open_file, reveal, undo_targets
 from .anim import FrameClock, Spring
 from .theme import palette, ui_font
 
@@ -125,7 +125,7 @@ class Toasts(QWidget):
             card.message = f"{out.name}{size}"
         else:
             card.message = f"{len(card.outputs)} files created"
-        card.expire_ms = 8000
+        card.expire_ms = 15000   # long enough to notice Undo
         self._relayout()
 
     def cancelled(self, job_id: int) -> None:
@@ -144,7 +144,7 @@ class Toasts(QWidget):
         self.update()
 
     def _undo(self, card: Card) -> None:
-        if winutil.recycle(card.outputs):
+        if winutil.recycle(undo_targets(card.outputs)):
             card.state = "undone"
             card.message = "Moved to the Recycle Bin"
         else:
@@ -299,7 +299,7 @@ class Toasts(QWidget):
                 labels = [("open", "Open folder")]
             for name, text in labels:
                 x = self._button(painter, card, name, text, x, bottom, pal) + 6
-            self._button(painter, card, "undo", "Undo", rect.right() - 14, bottom, pal, right=True, quiet=True)
+            self._button(painter, card, "undo", "Undo", rect.right() - 14, bottom, pal, right=True)
 
     def _button(self, painter: QPainter, card: Card, name: str, text: str, x: float, bottom: float, pal,
                 right: bool = False, quiet: bool = False) -> float:

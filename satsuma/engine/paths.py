@@ -48,6 +48,24 @@ def target_path(source, suffix: str, stem: str | None = None, folder: Path | Non
     return unique(candidate)
 
 
+def undo_targets(outputs) -> list[Path]:
+    """What Undo removes: a job's outputs, or the folder holding them when the job made that
+    folder just for them (e.g. "report-pages"). Never the user's chosen output folders."""
+    outputs = [Path(o) for o in outputs]
+    parents = {o.parent for o in outputs}
+    if len(parents) != 1:
+        return outputs
+    folder = parents.pop()
+    shared = {str(settings.get("output_custom") or "").strip(), str(settings.get("output_subfolder") or "")}
+    if str(folder) in shared or folder.name in shared:
+        return outputs
+    try:
+        inside = set(folder.iterdir())
+    except OSError:
+        return outputs
+    return [folder] if inside and inside <= set(outputs) else outputs
+
+
 def unique(path: Path) -> Path:
     path = Path(path)
     if not path.exists():

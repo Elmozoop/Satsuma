@@ -104,6 +104,7 @@ def test_toast_cancel_and_undo_flow(qapp, tmp_path, monkeypatch):
     toasts.cancelled(1)
     assert toasts._card(1).state == "cancelled"
 
+    (tmp_path / "a.png").write_text("original")   # results land beside their original
     made = tmp_path / "a.webp"
     made.write_text("x")
     recycled = []
@@ -113,3 +114,31 @@ def test_toast_cancel_and_undo_flow(qapp, tmp_path, monkeypatch):
     toasts._undo(toasts._card(2))
     assert recycled == [Path(made)] and toasts._card(2).state == "undone"
     toasts.hide()
+
+
+def test_undo_removes_a_folder_the_job_made(tmp_path):
+    from satsuma.config import settings
+    from satsuma.engine.paths import undo_targets
+
+    source = tmp_path / "report.pdf"
+    source.write_text("pdf")
+    pages = tmp_path / "report-pages"
+    pages.mkdir()
+    made = [pages / "report-1.png", pages / "report-2.png"]
+    for f in made:
+        f.write_text("png")
+    assert undo_targets(made) == [pages]                     # folder made just for these files
+    assert undo_targets(made[:1]) == made[:1]                # not all of the folder's contents
+    single = tmp_path / "report.txt"
+    single.write_text("txt")
+    assert undo_targets([single]) == [single]                # never the folder holding the original
+
+    chosen = tmp_path / "My exports"
+    chosen.mkdir()
+    out = chosen / "photo.webp"
+    out.write_text("x")
+    settings.set("output_custom", str(chosen))
+    try:
+        assert undo_targets([out]) == [out]                  # never the user's chosen output folder
+    finally:
+        settings.set("output_custom", "")

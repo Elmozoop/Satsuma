@@ -21,7 +21,7 @@ from .config import APP_ID, ASSETS_DIR, LOG_FILE, VERSION, settings
 from .detector import DragDetector
 from .engine import documents
 from .engine import ffmpeg_tool
-from .engine.paths import open_file, reveal
+from .engine.paths import open_file, reveal, undo_targets
 from .jobs import JobRunner
 from .ui import prompts
 from .ui.menu import ActionMenu
@@ -94,6 +94,7 @@ class Satsuma(QObject):
         self.runner = JobRunner(self)
         self.detector = DragDetector(self)
         self.settings_window: SettingsWindow | None = None
+        self._last_outputs: list[Path] = []   # for "Undo" in the tray menu
         self.server: QLocalServer | None = None
 
         self.menu.chosen.connect(self.on_chosen)
@@ -138,15 +139,42 @@ class Satsuma(QObject):
         self.enabled_action.toggled.connect(lambda v: settings.set("enabled", v))
         menu.addAction(self.enabled_action)
         menu.addAction("Open drop window", self.menu.open_pinned)
+        self.undo_action = QAction("Undo last conversion", menu)
+        self.undo_action.triggered.connect(self.undo_last)
+        menu.addAction(self.undo_action)
         menu.addAction("Settings…", self.show_settings)
         menu.addSeparator()
         menu.addAction("Open log", lambda: open_file(LOG_FILE))
         menu.addAction("Quit", self.quit)
-        menu.aboutToShow.connect(lambda: self.enabled_action.setChecked(bool(settings.get("enabled"))))
+        menu.aboutToShow.connect(self._tray_menu_opening)
         self.tray.setContextMenu(menu)
         self._tray_menu = menu
         self.tray.activated.connect(self._tray_activated)
         self.tray.show()
+
+    def _tray_menu_opening(self) -> None:
+        self.enabled_action.setChecked(bool(settings.get("enabled")))
+        targets = [p for p in undo_targets(self._last_outputs) if p.exists()]
+        self.undo_action.setEnabled(bool(targets))
+        if len(targets) == 1:
+            self.undo_action.setText(f"Undo “{targets[0].name}”")
+        elif targets:
+            self.undo_action.setText(f"Undo last conversion ({len(targets)} files)")
+        else:
+            self.undo_action.setText("Undo last conversion")
+
+    def undo_last(self) -> None:
+        """Send the last job's results to the Recycle Bin (same as Undo on its card)."""
+        targets = [p for p in undo_targets(self._last_outputs) if p.exists()]
+        if not targets:
+            return
+        if winutil.recycle(targets):
+            self._last_outputs = []
+            self.tray.showMessage("Satsuma", "Moved to the Recycle Bin. Restore it from there if needed.",
+                                  app_icon(), 4000)
+        else:
+            self.tray.showMessage("Satsuma", "Couldn't move it to the Recycle Bin. Is it open in another app?",
+                                  app_icon(), 6000)
 
     def _tray_activated(self, reason) -> None:
         if reason in (QSystemTrayIcon.Trigger, QSystemTrayIcon.DoubleClick):
@@ -226,6 +254,7 @@ class Satsuma(QObject):
             self.runner.submit(action, paths, params)
 
     def on_finished(self, _job_id: int, outputs: list) -> None:
+        self._last_outputs = [Path(o) for o in outputs]
         if settings.get("reveal_after") and outputs:
             reveal(outputs[0])
 
