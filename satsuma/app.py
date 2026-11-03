@@ -14,7 +14,7 @@ from pathlib import Path
 from PySide6.QtCore import QObject, QPoint, QPointF, QRectF, QStandardPaths, Qt, QTimer
 from PySide6.QtGui import QAction, QColor, QCursor, QIcon, QPainter, QPainterPath, QPixmap
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
-from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
+from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
 from . import history, winutil
 from .actions import Action
@@ -27,7 +27,9 @@ from .jobs import JobRunner
 from .ui import prompts
 from .ui.menu import ActionMenu
 from .ui.settings_window import SettingsWindow
+from .ui.controls import message
 from .ui.toast import Toasts
+from .ui.tray_badge import TrayActivity
 from .watcher import FolderWatcher
 
 log = logging.getLogger("satsuma")
@@ -107,6 +109,7 @@ class Satsuma(QObject):
         s = self.runner.signals
         s.started.connect(self.toasts.started)
         s.started.connect(lambda job_id, title, _sub: self._titles.__setitem__(job_id, title))
+        s.sources.connect(self.toasts.sources)
         s.progress.connect(self.toasts.progress)
         s.finished.connect(self.toasts.finished)
         s.failed.connect(self.toasts.failed)
@@ -133,7 +136,8 @@ class Satsuma(QObject):
     # ------------------------------------------------------------------ tray
     def _build_tray(self) -> None:
         self.tray = QSystemTrayIcon(app_icon(), self)
-        self.tray.setToolTip(f"Satsuma — hold {settings.get('modifier').title()} while dragging a file")
+        self.tray.setToolTip(self._idle_tooltip())
+        self.activity = TrayActivity(self.tray, app_icon(), self._idle_tooltip, self.runner.signals, self)
         menu = QMenu()
         header = QAction(f"Satsuma {VERSION}", menu)
         header.setEnabled(False)
@@ -162,6 +166,10 @@ class Satsuma(QObject):
         self._tray_menu = menu
         self.tray.activated.connect(self._tray_activated)
         self.tray.show()
+
+    @staticmethod
+    def _idle_tooltip() -> str:
+        return f"Satsuma — hold {settings.get('modifier').title()} while dragging a file"
 
     def _tray_menu_opening(self) -> None:
         self.enabled_action.setChecked(bool(settings.get("enabled")))
@@ -313,7 +321,7 @@ class Satsuma(QObject):
             params = prompts.ask(action.prompt, [Path(p) for p in paths])
         except Exception as exc:
             log.exception("prompt failed")
-            QMessageBox.warning(None, "Satsuma", f"Could not read the file: {exc}")
+            message(None, "Couldn't read the file", str(exc))
             return
         if params is not None:
             self.runner.submit(action, paths, params)

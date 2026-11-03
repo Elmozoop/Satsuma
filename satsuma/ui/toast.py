@@ -5,12 +5,15 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import QMimeData, QPoint, QPointF, QRectF, Qt, QTimer, QUrl, Signal
-from PySide6.QtGui import QColor, QDrag, QFont, QFontMetrics, QGuiApplication, QPainter, QPainterPath, QPen
+from PySide6.QtGui import (QColor, QDrag, QFont, QFontMetrics, QGuiApplication, QPainter, QPainterPath, QPen,
+                           QPixmap)
 from PySide6.QtWidgets import QApplication, QFileIconProvider, QWidget
 
 from .. import winutil
 from ..engine.paths import human_size, open_file, reveal, undo_targets
+from . import thumbs
 from .anim import FrameClock, Spring
+from .icons import draw_icon
 from .theme import palette, ui_font
 
 CARD_W = 340
@@ -18,6 +21,32 @@ CARD_H = 74
 MARGIN = 14
 SHADOW = 12
 BTN_H = 22
+THUMB = 48
+
+
+def _total_size(paths) -> int | None:
+    """Combined size of files, or None if any is a folder or can't be read."""
+    total = 0
+    for path in paths:
+        path = Path(path)
+        try:
+            if not path.is_file():
+                return None
+            total += path.stat().st_size
+        except OSError:
+            return None
+    return total
+
+
+def size_change(before: int | None, after: int | None) -> str:
+    """'2.4 MB → 380 KB (−84%)', or just the new size when there's nothing to compare."""
+    if after is None:
+        return ""
+    if not before:
+        return human_size(after)
+    change = round((after - before) / before * 100)
+    note = f" (−{-change}%)" if change <= -1 else f" (+{change}%)" if change >= 1 else ""
+    return f"{human_size(before)} → {human_size(after)}{note}"
 
 
 class Card:
@@ -29,6 +58,8 @@ class Card:
         self.fraction = 0.0
         self.state = "running"   # running | cancelling | done | failed | cancelled | undone
         self.outputs: list[Path] = []
+        self.before: int | None = None     # size of the sources, for "before → after"
+        self.thumb: QPixmap | None = None
         self.buttons: list[tuple[QRectF, str]] = []
         self.close_rect = QRectF()
         self.rect = QRectF()
@@ -111,6 +142,11 @@ class Toasts(QWidget):
             card.shown.to(fraction)
             self.clock.start()
 
+    def sources(self, job_id: int, paths: list[str]) -> None:
+        card = self._card(job_id)
+        if card:
+            card.before = _total_size(paths)
+
     def finished(self, job_id: int, outputs: list[str]) -> None:
         card = self._card(job_id)
         if not card:
@@ -119,15 +155,13 @@ class Toasts(QWidget):
         card.fraction = 1.0
         card.shown.to(1.0)
         card.outputs = [Path(o) for o in outputs]
-        if len(card.outputs) == 1:
-            out = card.outputs[0]
-            try:
-                size = "" if out.is_dir() else f" · {human_size(out.stat().st_size)}"
-            except OSError:
-                size = ""
-            card.message = f"{out.name}{size}"
-        else:
-            card.message = f"{len(card.outputs)} files created"
+        sizes = size_change(card.before, _total_size(card.outputs))
+        name = card.outputs[0].name if len(card.outputs) == 1 else f"{len(card.outputs)} files"
+        card.message = f"{name} · {sizes}" if sizes else name
+        first = next((o for o in card.outputs if o.is_file()), None)
+        image = thumbs.thumbnail(first, THUMB * 2) if first else None
+        if image is not None:
+            card.thumb = QPixmap.fromImage(image)
         card.expire_ms = 15000   # long enough to notice Undo
         self._relayout()
 
@@ -290,22 +324,28 @@ class Toasts(QWidget):
 
         status_color = {"running": pal.accent, "cancelling": pal.muted, "done": pal.success,
                         "failed": pal.danger, "cancelled": pal.muted, "undone": pal.muted}[card.state]
-        painter.setPen(Qt.NoPen)
-        painter.setBrush(status_color)
-        painter.drawEllipse(QRectF(rect.left() + 14, rect.top() + 17, 8, 8))
+        thumb = card.thumb if card.state in ("done", "undone") else None
+        indent = 14 + THUMB + 12 if thumb else 30
+        if thumb:
+            self._paint_thumb(painter, card, thumb, QRectF(rect.left() + 13, rect.top() + 13, THUMB, THUMB),
+                              pal, status_color)
+        else:
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(status_color)
+            painter.drawEllipse(QRectF(rect.left() + 14, rect.top() + 17, 8, 8))
 
         painter.setPen(pal.text)
         painter.setFont(ui_font(9.6, QFont.DemiBold))
         metrics = QFontMetrics(painter.font())
-        title = metrics.elidedText(f"{card.title}", Qt.ElideRight, int(rect.width() - 70))
-        painter.drawText(QRectF(rect.left() + 30, rect.top() + 10, rect.width() - 64, 20),
+        title = metrics.elidedText(f"{card.title}", Qt.ElideRight, int(rect.width() - indent - 40))
+        painter.drawText(QRectF(rect.left() + indent, rect.top() + 10, rect.width() - indent - 34, 20),
                          Qt.AlignLeft | Qt.AlignVCenter, title)
 
         painter.setFont(ui_font(8.4))
         painter.setPen(pal.danger if card.state == "failed" else pal.muted)
         line = f"{card.subtitle} — {card.message}" if card.state in ("running", "cancelling") else card.message
-        line = QFontMetrics(painter.font()).elidedText(line, Qt.ElideMiddle, int(rect.width() - 44))
-        painter.drawText(QRectF(rect.left() + 30, rect.top() + 30, rect.width() - 44, 18),
+        line = QFontMetrics(painter.font()).elidedText(line, Qt.ElideMiddle, int(rect.width() - indent - 14))
+        painter.drawText(QRectF(rect.left() + indent, rect.top() + 30, rect.width() - indent - 14, 18),
                          Qt.AlignLeft | Qt.AlignVCenter, line)
 
         card.rect = QRectF(rect)
@@ -330,13 +370,39 @@ class Toasts(QWidget):
             filled = QRectF(track.left(), track.top(), max(6.0, track.width() * shown), track.height())
             painter.drawRoundedRect(filled, 2, 2)
         elif card.state == "done" and card.outputs:
-            x = rect.left() + 30
+            x = rect.left() + indent
             labels = [("open", "Open"), ("reveal", "Show in folder")]
             if card.outputs[0].is_dir():
                 labels = [("open", "Open folder")]
             for name, text in labels:
                 x = self._button(painter, card, name, text, x, bottom, pal) + 6
             self._button(painter, card, "undo", "Undo", rect.right() - 14, bottom, pal, right=True)
+
+    @staticmethod
+    def _paint_thumb(painter: QPainter, card: Card, thumb: QPixmap, box: QRectF, pal, status: QColor) -> None:
+        """The result, cropped to a rounded square, with a small status badge in its corner."""
+        clip = QPainterPath()
+        clip.addRoundedRect(box, 8, 8)
+        painter.save()
+        painter.setClipPath(clip)
+        painter.fillPath(clip, pal.tile)
+        scaled = thumb.scaled(int(box.width() * 2), int(box.height() * 2), Qt.KeepAspectRatioByExpanding,
+                              Qt.SmoothTransformation)
+        source = QRectF((scaled.width() - box.width() * 2) / 2, (scaled.height() - box.height() * 2) / 2,
+                        box.width() * 2, box.height() * 2)
+        if card.state == "undone":
+            painter.setOpacity(0.35)
+        painter.drawPixmap(box, scaled, source)
+        painter.restore()
+        painter.setPen(QPen(pal.border, 1))
+        painter.setBrush(Qt.NoBrush)
+        painter.drawPath(clip)
+        badge = QPointF(box.right() - 2, box.bottom() - 2)
+        painter.setPen(QPen(pal.panel, 2))
+        painter.setBrush(status)
+        painter.drawEllipse(badge, 7.5, 7.5)
+        if card.state == "done":
+            draw_icon(painter, "tick", badge, 10, QColor(255, 255, 255), 1.8)
 
     def _button(self, painter: QPainter, card: Card, name: str, text: str, x: float, bottom: float, pal,
                 right: bool = False, quiet: bool = False) -> float:

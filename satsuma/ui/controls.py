@@ -158,6 +158,13 @@ def stylesheet() -> str:
     QLabel#rowHint, QLabel#hint {{ color: {muted}; font-size: 9pt; }}
     QLabel#value {{ color: {muted}; }}
     QLabel#example {{ color: {muted}; font-family: "Cascadia Mono", Consolas, monospace; font-size: 9pt; }}
+    QLabel#promptTitle {{ font-size: 15pt; font-weight: 600; }}
+    QLabel#thumb {{ background: {card}; border: 1px solid {line}; border-radius: 10px; }}
+    QLabel#error {{ color: {pal.danger.name()}; }}
+    QRadioButton {{ spacing: 8px; background: transparent; }}
+    QRadioButton::indicator {{ width: 12px; height: 12px; border-radius: 8px; background: {field};
+                               border: 2px solid {muted}; }}
+    QRadioButton::indicator:checked {{ border: 5px solid {acc}; width: 6px; height: 6px; }}
     QLabel#dotOk {{ color: {pal.success.name()}; font-size: 14pt; }}
     QLabel#dotWarn {{ color: {acc}; font-size: 14pt; }}
 
@@ -180,6 +187,8 @@ def stylesheet() -> str:
     QPushButton#primary {{ background: {acc}; color: {on_accent.name()}; border: none; font-weight: 600; }}
     QPushButton#primary:hover {{ background: {accent.lighter(110).name()}; }}
     QPushButton#danger {{ color: {pal.danger.name()}; }}
+    QPushButton#danger-primary {{ background: {pal.danger.name()}; color: white; border: none; font-weight: 600; }}
+    QPushButton#danger-primary:hover {{ background: {pal.danger.lighter(112).name()}; }}
 
     QWidget#segmented {{ background: {_rgba(QColor(text), 0.06)}; border: 1px solid {line}; border-radius: 7px; }}
     QPushButton#segment {{ background: transparent; border: none; border-radius: 5px; padding: 4px 12px; }}
@@ -220,3 +229,59 @@ def stylesheet() -> str:
     QScrollBar::add-page, QScrollBar::sub-page {{ background: transparent; }}
     QToolTip {{ background: {card}; color: {text}; border: 1px solid {field_border}; padding: 4px; }}
     """
+
+
+# ----------------------------------------------------------------------------- themed dialogs
+def _dialog(parent, title: str, text: str, buttons: list[tuple[str, str, bool]]) -> str | None:
+    """A small dialog in Satsuma's style. `buttons` are (key, label, is_primary), right to left
+    in importance; returns the key of the button pressed, or None if the window was closed."""
+    from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QVBoxLayout
+
+    dialog = QDialog(parent)
+    dialog.setWindowTitle(title)
+    dialog.setWindowFlags(Qt.Dialog | Qt.WindowStaysOnTopHint | Qt.WindowCloseButtonHint)
+    dialog.setMinimumWidth(380)
+    dialog.setStyleSheet(stylesheet())
+    layout = QVBoxLayout(dialog)
+    layout.setContentsMargins(22, 20, 22, 18)
+    layout.setSpacing(10)
+    heading = QLabel(title)
+    heading.setObjectName("promptTitle")
+    layout.addWidget(heading)
+    body = QLabel(text)
+    body.setWordWrap(True)
+    layout.addWidget(body)
+    layout.addSpacing(8)
+    row = QHBoxLayout()
+    row.addStretch(1)
+    chosen: list[str] = []
+    for key, label, primary in reversed(buttons):
+        button = QPushButton(label)
+        if primary:
+            button.setObjectName("danger-primary" if key == "danger" else "primary")
+            button.setDefault(True)
+        button.clicked.connect(lambda _c=False, k=key: (chosen.append(k), dialog.accept()))
+        row.addWidget(button)
+    layout.addLayout(row)
+    dialog.exec()
+    return chosen[0] if chosen else None
+
+
+def confirm(parent, title: str, text: str, action: str, danger: bool = False) -> bool:
+    key = "danger" if danger else "ok"
+    return _dialog(parent, title, text, [(key, action, True), ("cancel", "Cancel", False)]) == key
+
+
+def message(parent, title: str, text: str) -> None:
+    _dialog(parent, title, text, [("ok", "OK", True)])
+
+
+def pick_colour(parent, current: QColor, title: str) -> QColor:
+    """Qt's own colour picker (not the Windows one), so it can wear Satsuma's theme."""
+    from PySide6.QtWidgets import QColorDialog
+
+    dialog = QColorDialog(current, parent)
+    dialog.setWindowTitle(title)
+    dialog.setOption(QColorDialog.DontUseNativeDialog, True)
+    dialog.setStyleSheet(stylesheet())
+    return dialog.selectedColor() if dialog.exec() else QColor()

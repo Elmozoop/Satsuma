@@ -40,6 +40,7 @@ def friendly_error(exc: BaseException) -> str:
 
 class JobSignals(QObject):
     started = Signal(int, str, str)          # job id, title, subtitle
+    sources = Signal(int, list)              # job id, [input paths as str]: for before -> after sizes
     progress = Signal(int, float, str)       # job id, fraction 0..1, message
     finished = Signal(int, list)             # job id, [output paths as str]
     failed = Signal(int, str)                # job id, message
@@ -66,6 +67,7 @@ class Job(QRunnable):
         title = f"{self.action.label} · {self.action.caption}" if self.action.caption else self.action.label
         subtitle = self.paths[0].name if len(self.paths) == 1 else f"{len(self.paths)} files"
         self.signals.started.emit(self.id, title, subtitle)
+        self.signals.sources.emit(self.id, [str(p) for p in self.paths])
         try:
             self.token.check()
             missing = [p for p in self.paths if not p.exists()]

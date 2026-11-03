@@ -114,7 +114,7 @@ class ActionMenu(QWidget):
     # ------------------------------------------------------------------ entry points
     def arm(self, cursor: QPoint, smart: bool = True) -> None:
         """Called by the detector when a modifier-drag starts."""
-        if self.mode in ("drop", "click", "pinned"):
+        if self.mode in ("drop", "click", "pinned", "confirming"):
             return
         self._hide_timer.stop()
         self._dropped = False
@@ -184,6 +184,7 @@ class ActionMenu(QWidget):
         self.mode = "hidden"
         self.view.set_hover(None)
         self.view.opening.snap(0.0)
+        self.view.glow.snap(0.0)
         self.view.release()
         self.hide()
         self.closed.emit()
@@ -237,10 +238,12 @@ class ActionMenu(QWidget):
     # ------------------------------------------------------------------ drag & drop
     def dragEnterEvent(self, event) -> None:
         paths = local_paths(event.mimeData())
-        if not paths:
+        if not paths or self.mode == "confirming":
             event.ignore()
             return
         self._hide_timer.stop()
+        self.view.glow.to(1.0)
+        self.clock.start()
         if self.mode == "sense":
             self.mode = "drop"
             self.paths = paths
@@ -266,10 +269,13 @@ class ActionMenu(QWidget):
             event.ignore()
 
     def dragLeaveEvent(self, event) -> None:
+        self.view.glow.to(0.0)
+        self.clock.start()
         self._set_hover(None)
         event.accept()
 
     def dropEvent(self, event) -> None:
+        self.view.glow.to(0.0)
         target = self.view.hit(event.position(), self.center)
         paths = local_paths(event.mimeData()) or self.paths
         event.setDropAction(Qt.CopyAction)
@@ -279,14 +285,25 @@ class ActionMenu(QWidget):
         event.accept()
         self._dropped = True
         # Return to the drag source first; never block inside a drop callback.
-        QTimer.singleShot(0, lambda: self._choose(target.action, paths))
+        QTimer.singleShot(0, lambda: self._choose(target, paths))
 
-    def _choose(self, action: Action, paths: list[Path]) -> None:
+    def _choose(self, wedge: Wedge, paths: list[Path]) -> None:
+        animate = settings.get("anim_speed") != "off"
+        if animate:
+            self.view.confirm_choice(wedge)    # a short tick on the chosen wedge first
+            self.clock.start()
         if self.mode != "pinned":
-            self.dismiss(animate=True)
+            self.mode = "confirming"
+            QTimer.singleShot(280 if animate else 0, lambda: self.dismiss(animate=True))
         else:
             self._set_hover(None)
-        self.chosen.emit(action, paths)
+            QTimer.singleShot(650, self._clear_confirm)   # the drop window stays open: tidy up
+        self.chosen.emit(wedge.action, paths)
+
+    def _clear_confirm(self) -> None:
+        self.view.chosen = None
+        self.view.confirm.snap(0.0)
+        self.update()
 
     # ------------------------------------------------------------------ mouse (click / pinned)
     def mouseMoveEvent(self, event) -> None:
@@ -325,7 +342,7 @@ class ActionMenu(QWidget):
         if self.mode not in ("click", "pinned"):
             return
         if isinstance(target, Wedge) and target is pressed and self.paths:
-            self._choose(target.action, list(self.paths))
+            self._choose(target, list(self.paths))
         elif target == "hub" and pressed == "hub":
             self.view.switch_page()
             self.clock.start()

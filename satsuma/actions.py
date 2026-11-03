@@ -113,11 +113,11 @@ def _image_actions() -> list[Action]:
         Action("img-flip", "Flip", "mirror", "tools",
                _each(lambda p, _params: images.flip(p, horizontal=True)), icon="flip"),
         Action("img-clean", "Clean", "remove location & camera info", "tools",
-               _each(lambda p, _params: images.strip_metadata(p))),
+               _each(lambda p, _params: images.strip_metadata(p)), icon="clean"),
         Action("img-bw", "B&W", "black and white", "tools",
-               _each(lambda p, _params: images.grayscale(p))),
+               _each(lambda p, _params: images.grayscale(p)), icon="bw"),
         Action("img-square", "Square", "fit, no cropping", "tools",
-               _each(lambda p, _params: images.pad_square(p))),
+               _each(lambda p, _params: images.pad_square(p)), icon="square"),
     ]
     return actions
 
@@ -147,11 +147,11 @@ def _video_actions() -> list[Action]:
                _each(lambda p, _params: media.snapshot(p)), needs_ffmpeg=True, icon="frame"),
         Action("vid-speed", "Speed", "faster or slower", "tools",
                _each(lambda p, params: media.change_speed(p, params["factor"])),
-               needs_ffmpeg=True, prompt="speed"),
+               needs_ffmpeg=True, prompt="speed", icon="speed"),
         Action("vid-rotate", "Rotate", "90° clockwise", "tools",
                _each(lambda p, _params: media.rotate_video(p)), needs_ffmpeg=True, icon="rotate"),
         Action("vid-boomerang", "Boomerang", "looping GIF", "tools",
-               _each(lambda p, _params: media.boomerang(p)), needs_ffmpeg=True),
+               _each(lambda p, _params: media.boomerang(p)), needs_ffmpeg=True, icon="boomerang"),
         Action("vid-join", "Join", "end to end", "tools",
                _all(lambda ps, _params: media.concat(ps)), min_files=2, needs_ffmpeg=True, icon="join"),
     ]
@@ -185,10 +185,12 @@ def _pdf_actions(paths: list[Path] | None = None) -> list[Action]:
     passwords = []
     if locked is None or not any(locked):
         passwords.append(Action("pdf-lock", "Lock", "add a password", "tools",
-                                _each(lambda p, params: pdfs.lock(p, params["password"])), prompt="lock"))
+                                _each(lambda p, params: pdfs.lock(p, params["password"])), prompt="lock",
+                                icon="lock"))
     if locked is None or all(locked):
         passwords.append(Action("pdf-unlock", "Unlock", "remove the password", "tools",
-                                _each(lambda p, params: pdfs.unlock(p, params["password"])), prompt="unlock"))
+                                _each(lambda p, params: pdfs.unlock(p, params["password"])), prompt="unlock",
+                                icon="unlock"))
     if locked and all(locked):
         return passwords   # everything else would fail on a password-protected PDF
     return [
@@ -210,7 +212,7 @@ def _pdf_actions(paths: list[Path] | None = None) -> list[Action]:
         Action("pdf-rotate", "Rotate", "90° clockwise", "tools",
                _each(lambda p, _params: pdfs.rotate(p, 90)), icon="rotate"),
         Action("pdf-numbers", "Numbers", "page numbers", "tools",
-               _each(lambda p, _params: pdfs.add_page_numbers(p)), icon="pages"),
+               _each(lambda p, _params: pdfs.add_page_numbers(p)), icon="numbers"),
     ] + passwords
 
 

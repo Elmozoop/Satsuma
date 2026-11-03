@@ -17,6 +17,8 @@ from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import (QBrush, QColor, QFont, QFontMetricsF, QPainter, QPainterPath,
                            QPainterPathStroker, QPen, QPixmap, QRadialGradient)
 
+from . import thumbs
+
 from .. import filetypes as ft
 from ..actions import Action, actions_for
 from ..config import settings
@@ -32,6 +34,18 @@ PLATE_PAD = 8.0     # plate extends this far beyond the wedges
 GAP = 5.0           # straight gap between wedges (px at 100 %)
 CORNER = 9.0        # wedge corner radius (px at 100 %)
 STAGGER = 0.024     # seconds between wedges appearing
+
+# Subtle tints for convert wedges, by what they produce (only when "type_colors" is on).
+TYPE_TINTS = {ft.IMAGE: QColor(56, 160, 255), ft.VIDEO: QColor(168, 104, 255),
+              ft.AUDIO: QColor(52, 199, 120), ft.DOCUMENT: QColor(240, 180, 40), ft.PDF: QColor(240, 180, 40)}
+
+
+def result_kind(action: Action) -> str | None:
+    """The kind of file a convert action makes ("image", "video", ...), from its label."""
+    if action.group != "convert" or not action.label.isalnum():
+        return None
+    kind = ft.category_of(Path(f"x.{action.label.lower()}"))
+    return kind if kind in TYPE_TINTS else None
 
 
 @dataclass
@@ -101,6 +115,10 @@ class RadialView:
         self.dwell = 0.0
         self.dwell_enabled = True
         self.chosen: Wedge | None = None
+        self.confirm = Spring(0.0, "main")      # 0 → 1 as the finish tick plays on `chosen`
+        self.thumb_fade = Spring(0.0, "main")
+        self.glow = Spring(0.0, "hover")         # 0 → 1 while files are dragged over the ring
+        self._thumb = None                       # None, "pending", "none" or a QPixmap
         self.empty_text = "Drop files here"
         self._paths_cache: dict = {}
         self._sprites: dict = {}      # pre-rendered wedges / plate, reused every frame
@@ -151,6 +169,9 @@ class RadialView:
         self.hub_armed = False
         self.dwell = 0.0
         self.chosen = None
+        self.confirm.snap(0.0)
+        self._thumb = "pending" if len(self.paths) == 1 else None
+        self.thumb_fade.snap(0.0)
         self._paths_cache.clear()
         self._sprites.clear()
         self._stagger_in(animate)
@@ -286,7 +307,7 @@ class RadialView:
     def tick(self, dt: float) -> tuple[bool, bool]:
         """Advance animations. Returns (still animating, page switched by dwell)."""
         moving = False
-        for spring in (self.opening, self.page_pos, self.hub_fade):
+        for spring in (self.opening, self.page_pos, self.hub_fade, self.confirm, self.thumb_fade, self.glow):
             moving |= spring.step(dt)
         for wedge in self.wedges:
             moving |= wedge.hover.step(dt)
@@ -330,7 +351,7 @@ class RadialView:
     # -- sprites -------------------------------------------------------------
     def _check_style(self, pal, dpr: float) -> None:
         key = (round(self.scale, 3), pal.panel.rgba(), pal.text.rgba(), pal.accent.rgba(),
-               bool(settings.get("show_icons")), round(dpr, 2))
+               bool(settings.get("show_icons")), bool(settings.get("type_colors")), round(dpr, 2))
         if key != self._style_key:
             self._style_key = key
             self._sprites.clear()
@@ -414,8 +435,9 @@ class RadialView:
             for wedge in wedges:
                 self._wedge_sprite(wedge, len(wedges), False, pal, dark, dpr)
 
-    def _wedge_sprite(self, wedge: Wedge, count: int, hovered: bool, pal, dark: bool, dpr: float):
-        key = ("hot" if hovered else "base", wedge.page, wedge.index, count)
+    def _wedge_sprite(self, wedge: Wedge, count: int, hovered: bool, pal, dark: bool, dpr: float,
+                      label: bool = True):
+        key = ("hot" if hovered else "base", label, wedge.page, wedge.index, count)
         sprite = self._sprites.get(key)
         if sprite:
             return sprite
@@ -439,12 +461,24 @@ class RadialView:
             fg = pal.on_accent
         else:
             painter.setPen(QPen(QColor(255, 255, 255, 26) if dark else QColor(0, 0, 0, 18), 1.0))
-            painter.setBrush(QColor(255, 255, 255, 24) if dark else QColor(255, 255, 255, 175))
+            fill = QColor(255, 255, 255, 24) if dark else QColor(255, 255, 255, 175)
+            kind = result_kind(wedge.action) if settings.get("type_colors") else None
+            if kind:
+                tint = QColor(TYPE_TINTS[kind])
+                tint.setAlpha(46 if dark else 38)
+                painter.setBrush(fill)
+                painter.drawPath(path)
+                painter.setPen(QPen(QColor(TYPE_TINTS[kind].red(), TYPE_TINTS[kind].green(),
+                                           TYPE_TINTS[kind].blue(), 90), 1.0))
+                fill = tint
+            painter.setBrush(fill)
             fg = pal.text
         painter.drawPath(path)
 
         action = wedge.action
-        if settings.get("show_icons") and action.icon:
+        if not label:
+            pass                       # the finish tick is drawn on its own
+        elif settings.get("show_icons") and action.icon:
             draw_icon(painter, action.icon, QPointF(cx, cy - 8 * s), 21 * s, fg, 1.7 * s)
             painter.setFont(self._font(10.5 * s, QFont.DemiBold))
             painter.setPen(fg)
@@ -489,6 +523,8 @@ class RadialView:
         painter.setRenderHint(QPainter.SmoothPixmapTransform, False)  # a soft gradient: no visible cost
         painter.drawPixmap(shadow_origin, shadow)
         painter.restore()
+        if self.glow.value > 0.01:
+            self._paint_glow(painter, pal, r_out)
         pixmap, origin = self._plate_sprite(pal, dark, dpr)
         painter.drawPixmap(origin, pixmap)
 
@@ -511,13 +547,34 @@ class RadialView:
         self._paint_hub(painter, pal, dark, hub_r)
         painter.restore()
 
+    def _paint_glow(self, painter: QPainter, pal, r_out: float) -> None:
+        """An accent halo around the plate: "let go here"."""
+        s = self.scale
+        g = max(0.0, min(1.0, self.glow.value))
+        plate_r = r_out + PLATE_PAD * s
+        outer = plate_r + 26 * s
+        halo = QRadialGradient(QPointF(0, 0), outer)
+        colour = QColor(pal.accent)
+        for stop, alpha in (((plate_r - 4 * s) / outer, 0.0), (plate_r / outer, 0.55 * g), (1.0, 0.0)):
+            colour.setAlphaF(alpha)
+            halo.setColorAt(stop, QColor(colour))
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QBrush(halo))
+        painter.drawEllipse(QPointF(0, 0), outer, outer)
+
     def _paint_ghost_ring(self, painter, pal, r_in, r_out, dark) -> None:
-        pen = QPen(pal.muted, 1.2 * self.scale, Qt.DashLine)
+        s = self.scale
+        g = max(0.0, min(1.0, self.glow.value))
+        pen = QPen(_mix_color(pal.muted, pal.accent, g), (1.2 + 1.0 * g) * s, Qt.DashLine)
         pen.setDashPattern([3, 4])
         painter.setPen(pen)
         painter.setBrush(Qt.NoBrush)
         mid = (r_in + r_out) / 2
         painter.drawEllipse(QPointF(0, 0), mid, mid)
+        hub_r = self._radii()[0]
+        lift = 3 * s * g                  # the arrow nudges down as if inviting the drop
+        draw_icon(painter, "save", QPointF(0, -hub_r * 0.6 + lift), 15 * s,
+                  _mix_color(pal.muted, pal.accent, g), 1.6 * s)
 
     def _paint_page(self, painter: QPainter, page: int, pal, dark: bool, dpr: float) -> None:
         wedges = self.page_wedges(page)
@@ -547,10 +604,74 @@ class RadialView:
                 painter.setOpacity(painter.opacity() * min(1.0, h))
                 painter.drawPixmap(hot_origin, hot)
             painter.restore()
+            if wedge is self.chosen and self.confirm.value > 0.001:
+                self._paint_confirm(painter, wedge, count, pal, dark, dpr)
+
+    def confirm_choice(self, wedge: "Wedge") -> None:
+        """Play the finish tick on the wedge that was just chosen."""
+        self.chosen = wedge
+        self.confirm.snap(0.0)
+        self.confirm.to(1.0)
+
+    def _paint_confirm(self, painter: QPainter, wedge: "Wedge", count: int, pal, dark: bool, dpr: float) -> None:
+        t = max(0.0, min(1.0, self.confirm.value))
+        s = self.scale
+        hot, hot_origin, centroid, _mid = self._wedge_sprite(wedge, count, True, pal, dark, dpr, label=False)
+        painter.save()
+        painter.drawPixmap(hot_origin, hot)
+        ripple = QColor(pal.on_accent)
+        ripple.setAlphaF(max(0.0, 0.55 * (1.0 - t)))
+        painter.setPen(QPen(ripple, 2.2 * s))
+        painter.setBrush(Qt.NoBrush)
+        painter.drawEllipse(centroid, (14 + 30 * t) * s, (14 + 30 * t) * s)
+        pop = min(1.0, t * 1.5)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(pal.on_accent)
+        painter.drawEllipse(centroid, 17 * s * pop, 17 * s * pop)
+        draw_icon(painter, "tick", centroid, 22 * s * pop, pal.accent, 2.6 * s)
+        painter.restore()
+
+    def _hub_thumbnail(self, hub_r: float, dpr: float):
+        """Load the dragged file's preview once the ring has finished opening, so it never
+        delays the ring itself; then fade it in."""
+        if self._thumb == "pending" and self.opening.value >= 0.9 and self.paths:
+            side = int(2 * hub_r * dpr)
+            image = thumbs.thumbnail(self.paths[0], side)
+            if image is None:
+                self._thumb = "none"
+            else:
+                pixmap = QPixmap.fromImage(image.scaled(side, side, Qt.KeepAspectRatioByExpanding,
+                                                        Qt.SmoothTransformation))
+                pixmap.setDevicePixelRatio(dpr)
+                self._thumb = pixmap
+                self.thumb_fade.to(1.0)
+        return self._thumb if isinstance(self._thumb, QPixmap) else None
 
     def _paint_hub(self, painter: QPainter, pal, dark: bool, hub_r: float) -> None:
         s = self.scale
         hub_h = 1.0 if self.hover == "hub" else 0.0
+
+        # The dragged file itself, softly, behind the text
+        dpr = painter.device().devicePixelRatioF() if painter.device() else 1.0
+        thumb = self._hub_thumbnail(hub_r, dpr)
+        if thumb is not None and self.thumb_fade.value > 0.01:
+            r = hub_r - 1.5 * s
+            clip = QPainterPath()
+            clip.addEllipse(QPointF(0, 0), r, r)
+            painter.save()
+            painter.setClipPath(clip)
+            painter.setOpacity(painter.opacity() * 0.62 * min(1.0, self.thumb_fade.value))
+            w, h = thumb.width() / dpr, thumb.height() / dpr
+            painter.drawPixmap(QRectF(-w / 2, -h / 2, w, h), thumb, QRectF(thumb.rect()))
+            painter.setOpacity(1.0)
+            veil = QRadialGradient(QPointF(0, 0), r)
+            base = QColor(pal.panel)
+            base.setAlpha(185 if dark else 150)
+            veil.setColorAt(0.0, base)
+            base.setAlpha(80)
+            veil.setColorAt(1.0, base)
+            painter.fillPath(clip, QBrush(veil))   # keeps the text above it readable
+            painter.restore()
 
         # Pill
         pill = QRectF(-hub_r * 0.86, -hub_r * 0.36, hub_r * 1.72, hub_r * 0.72)
@@ -577,8 +698,14 @@ class RadialView:
             painter.save()
             painter.setOpacity(painter.opacity() * alpha)
             primary, secondary = text
-            font = self._font(13 * s if len(primary) <= 10 else 11 * s, QFont.Bold)
-            metrics = QFontMetricsF(font)
+            room = pill.width() - 10 * s
+            for px in (13, 11, 10, 9):      # shrink a little to fit before ever cutting the text
+                font = self._font(px * s, QFont.Bold)
+                metrics = QFontMetricsF(font)
+                if px <= 11 and metrics.horizontalAdvance(primary) <= room:
+                    break
+                if px == 13 and len(primary) <= 10 and metrics.horizontalAdvance(primary) <= room:
+                    break
             primary = metrics.elidedText(primary, Qt.ElideMiddle, pill.width() - 10 * s)
             painter.setFont(font)
             painter.setPen(pal.text)

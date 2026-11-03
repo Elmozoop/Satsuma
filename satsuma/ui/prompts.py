@@ -1,14 +1,20 @@
-"""Small dialogs for actions that need a value (resize, trim, page range)."""
+"""Small dialogs for actions that need a value (resize, trim, pages, passwords, speed).
+They follow Satsuma's theme and show a preview of the file they're about."""
 from __future__ import annotations
 
 import re
 from pathlib import Path
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (QButtonGroup, QDialog, QDialogButtonBox, QGridLayout, QLabel,
-                               QLineEdit, QRadioButton, QSpinBox, QVBoxLayout)
+from PySide6.QtGui import QPixmap
+from PySide6.QtWidgets import (QButtonGroup, QDialog, QDialogButtonBox, QFrame, QGridLayout,
+                               QHBoxLayout, QLabel, QLineEdit, QRadioButton, QSpinBox, QVBoxLayout)
 
 from ..engine import ffmpeg_tool as ff
+from .controls import stylesheet
+from .thumbs import file_icon, thumbnail
+
+THUMB = 64
 
 
 def parse_time(text: str) -> float | None:
@@ -34,23 +40,71 @@ def format_time(seconds: float) -> str:
     return f"{int(minutes)}:{secs:05.2f}".rstrip("0").rstrip(".")
 
 
+def _preview(paths: list[Path] | None) -> QLabel:
+    label = QLabel()
+    label.setObjectName("thumb")
+    label.setFixedSize(THUMB, THUMB)
+    label.setAlignment(Qt.AlignCenter)
+    if paths:
+        ratio = label.devicePixelRatioF() or 1.0
+        image = thumbnail(paths[0], int(THUMB * ratio))
+        if image is not None:
+            pixmap = QPixmap.fromImage(image).scaled(int((THUMB - 8) * ratio), int((THUMB - 8) * ratio),
+                                                      Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            pixmap.setDevicePixelRatio(ratio)
+        else:
+            pixmap = file_icon(paths[0], 40)
+        label.setPixmap(pixmap)
+    return label
+
+
 class _Base(QDialog):
-    def __init__(self, title: str, subtitle: str):
+    ok_text = "OK"
+
+    def __init__(self, title: str, subtitle: str, paths: list[Path] | None = None):
         super().__init__(None)
         self.setWindowTitle(f"Satsuma — {title}")
         self.setWindowFlags(Qt.Dialog | Qt.WindowStaysOnTopHint | Qt.WindowCloseButtonHint)
-        self.setMinimumWidth(340)
+        self.setMinimumWidth(400)
+        self.setStyleSheet(stylesheet())
         self.layout_ = QVBoxLayout(self)
-        heading = QLabel(f"<b>{title}</b><br><span style='color:gray'>{subtitle}</span>")
-        heading.setTextFormat(Qt.RichText)
-        self.layout_.addWidget(heading)
-        self.grid = QGridLayout()
+        self.layout_.setContentsMargins(22, 20, 22, 18)
+        self.layout_.setSpacing(14)
+
+        header = QHBoxLayout()
+        header.setSpacing(14)
+        header.addWidget(_preview(paths))
+        text = QVBoxLayout()
+        text.setSpacing(2)
+        heading = QLabel(title)
+        heading.setObjectName("promptTitle")
+        text.addWidget(heading)
+        sub = QLabel(subtitle)
+        sub.setObjectName("hint")
+        sub.setWordWrap(True)
+        text.addWidget(sub)
+        text.addStretch(1)
+        header.addLayout(text, 1)
+        self.layout_.addLayout(header)
+
+        body = QFrame()
+        body.setObjectName("card")
+        self.grid = QGridLayout(body)
+        self.grid.setContentsMargins(16, 14, 16, 14)
+        self.grid.setHorizontalSpacing(14)
+        self.grid.setVerticalSpacing(10)
         self.grid.setColumnStretch(1, 1)
-        self.layout_.addLayout(self.grid)
+        self.layout_.addWidget(body)
+
         self.error = QLabel("")
-        self.error.setStyleSheet("color:#d6342c")
+        self.error.setObjectName("error")
+        self.error.setWordWrap(True)
         self.layout_.addWidget(self.error)
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        ok = buttons.button(QDialogButtonBox.Ok)
+        ok.setObjectName("primary")
+        ok.setText(self.ok_text)
+        ok.setDefault(True)
         buttons.accepted.connect(self._try_accept)
         buttons.rejected.connect(self.reject)
         self.layout_.addWidget(buttons)
@@ -68,6 +122,7 @@ class _Base(QDialog):
 
 
 class ResizePrompt(_Base):
+    ok_text = "Resize"
     def __init__(self, paths: list[Path]):
         subtitle = paths[0].name if len(paths) == 1 else f"{len(paths)} images"
         try:
@@ -78,7 +133,7 @@ class ResizePrompt(_Base):
             subtitle += f" · {meta['width']}×{meta['height']}"
         except Exception:
             self.size = None
-        super().__init__("Resize", subtitle)
+        super().__init__("Resize", subtitle, paths)
 
         self.group = QButtonGroup(self)
         self.by_scale = QRadioButton("Scale")
@@ -112,12 +167,13 @@ class ResizePrompt(_Base):
 
 
 class TrimPrompt(_Base):
+    ok_text = "Trim"
     def __init__(self, paths: list[Path]):
         self.duration = ff.duration_of(paths[0]) if ff.ffprobe_path() else 0.0
         subtitle = paths[0].name if len(paths) == 1 else f"{len(paths)} files (same cut for each)"
         if self.duration:
             subtitle += f" · {format_time(self.duration)} long"
-        super().__init__("Trim", subtitle)
+        super().__init__("Trim", subtitle, paths)
         self.start = QLineEdit("0:00")
         self.end = QLineEdit(format_time(self.duration) if self.duration else "")
         self.end.setPlaceholderText("e.g. 1:30")
@@ -126,7 +182,7 @@ class TrimPrompt(_Base):
         self.grid.addWidget(QLabel("End"), 1, 0)
         self.grid.addWidget(self.end, 1, 1)
         hint = QLabel("Seconds or m:ss — e.g. 75, 1:15, 1:02:03")
-        hint.setStyleSheet("color:gray")
+        hint.setObjectName("hint")
         self.grid.addWidget(hint, 2, 1)
         self.start.setFocus()
         self.start.selectAll()
@@ -149,6 +205,7 @@ class TrimPrompt(_Base):
 
 
 class PagesPrompt(_Base):
+    ok_text = "Extract"
     def __init__(self, paths: list[Path]):
         try:
             from ..engine import pdfs  # loaded on demand: the PDF libraries are large
@@ -159,7 +216,7 @@ class PagesPrompt(_Base):
         subtitle = paths[0].name if len(paths) == 1 else f"{len(paths)} PDFs"
         if self.count != 9999:
             subtitle += f" · {self.count} page{'s' if self.count != 1 else ''}"
-        super().__init__("Extract pages", subtitle)
+        super().__init__("Extract pages", subtitle, paths)
         self.first = QSpinBox(minimum=1, maximum=self.count, value=1)
         self.last = QSpinBox(minimum=1, maximum=self.count, value=self.count if self.count != 9999 else 1)
         self.grid.addWidget(QLabel("From page"), 0, 0)
@@ -183,9 +240,10 @@ def _password_field() -> QLineEdit:
 
 
 class LockPrompt(_Base):
+    ok_text = "Lock PDF"
     def __init__(self, paths: list[Path]):
         subtitle = paths[0].name if len(paths) == 1 else f"{len(paths)} PDFs (same password)"
-        super().__init__("Add a password", subtitle)
+        super().__init__("Add a password", subtitle, paths)
         self.password = _password_field()
         self.again = _password_field()
         self.grid.addWidget(QLabel("Password"), 0, 0)
@@ -193,7 +251,7 @@ class LockPrompt(_Base):
         self.grid.addWidget(QLabel("Again"), 1, 0)
         self.grid.addWidget(self.again, 1, 1)
         note = QLabel("Satsuma doesn't keep it. If you forget it, the copy can't be opened.")
-        note.setStyleSheet("color:gray")
+        note.setObjectName("hint")
         note.setWordWrap(True)
         self.grid.addWidget(note, 2, 0, 1, 2)
         self.password.setFocus()
@@ -208,8 +266,9 @@ class LockPrompt(_Base):
 
 
 class UnlockPrompt(_Base):
+    ok_text = "Unlock"
     def __init__(self, paths: list[Path]):
-        super().__init__("Remove the password", paths[0].name if len(paths) == 1 else f"{len(paths)} PDFs")
+        super().__init__("Remove the password", paths[0].name if len(paths) == 1 else f"{len(paths)} PDFs", paths)
         self.password = _password_field()
         self.grid.addWidget(QLabel("Current password"), 0, 0)
         self.grid.addWidget(self.password, 0, 1)
@@ -227,8 +286,9 @@ SPEEDS = [(0.25, "¼× slow motion"), (0.5, "½× slower"), (1.5, "1.5× faster"
 
 
 class SpeedPrompt(_Base):
+    ok_text = "Change speed"
     def __init__(self, paths: list[Path]):
-        super().__init__("Change speed", paths[0].name if len(paths) == 1 else f"{len(paths)} files")
+        super().__init__("Change speed", paths[0].name if len(paths) == 1 else f"{len(paths)} files", paths)
         self.group = QButtonGroup(self)
         for row, (factor, label) in enumerate(SPEEDS):
             button = QRadioButton(label)

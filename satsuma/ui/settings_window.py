@@ -6,10 +6,10 @@ from pathlib import Path
 
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt, QThread, QUrl, Signal
 from PySide6.QtGui import QColor, QDesktopServices, QFont, QIcon, QPainter, QPen, QPixmap
-from PySide6.QtWidgets import (QAbstractItemView, QButtonGroup, QColorDialog, QComboBox, QDialog,
+from PySide6.QtWidgets import (QAbstractItemView, QButtonGroup, QComboBox, QDialog,
                                QDialogButtonBox,
                                QFileDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
-                               QListWidget, QListWidgetItem, QMessageBox, QProgressBar, QPushButton,
+                               QListWidget, QListWidgetItem, QProgressBar, QPushButton,
                                QScrollArea, QSlider, QSpinBox, QStackedWidget, QStyle,
                                QStyledItemDelegate, QStyleOptionViewItem, QToolButton, QVBoxLayout,
                                QWidget)
@@ -20,16 +20,17 @@ from ..config import BIN_DIR, DATA_DIR, DEFAULTS, LOG_FILE, VERSION, settings
 from ..engine import documents
 from ..engine import ffmpeg_tool as ff
 from ..engine.paths import open_file
-from .controls import Segmented, Toggle, stylesheet
+from .controls import Segmented, Toggle, confirm, pick_colour, stylesheet
 from .icons import draw_icon
 from .preview import SAMPLES, RadialPreview
 from .theme import ACCENT_PRESETS, palette, readable_on
 
 LOOK_KEYS = ["theme", "accent", "menu_scale", "glass_opacity", "anim_speed", "bounce", "show_icons",
-             "show_captions", "hub_info", "wedges_per_ring", "hub_switch_ms", "start_page"]
+             "show_captions", "hub_info", "wedges_per_ring", "hub_switch_ms", "start_page", "type_colors"]
 PROJECT_URL = "https://github.com/Elmozoop/Satsuma"
 PAGES = ["Appearance", "Ring actions", "Trigger", "Saving", "Watched folders", "Converters", "About"]
 WATCH_PAGE = PAGES.index("Watched folders")
+PAGE_ICONS = ["palette", "ring", "pointer", "save", "folder", "gear", "info"]
 RESTYLE_KEYS = {"theme", "accent", "*"}
 
 
@@ -252,8 +253,10 @@ class SettingsWindow(QDialog):
         side.addWidget(_label("🍊  Satsuma", "brand"))
         self.nav = QListWidget()
         self.nav.setObjectName("nav")
+        self.nav.setIconSize(QSize(18, 18))
         for name in PAGES:
             self.nav.addItem(name)
+        self._paint_nav_icons()
         side.addWidget(self.nav, 1)
         side.addWidget(_label(f"Version {VERSION}", "hint"))
         root.addWidget(sidebar)
@@ -274,9 +277,22 @@ class SettingsWindow(QDialog):
         """True while a background FFmpeg download still reports to this window."""
         return bool(self._fetcher and self._fetcher.isRunning())
 
+    def _paint_nav_icons(self) -> None:
+        colour = palette().text
+        for row, name in enumerate(PAGE_ICONS):
+            pixmap = QPixmap(40, 40)
+            pixmap.setDevicePixelRatio(2.0)
+            pixmap.fill(Qt.transparent)
+            painter = QPainter(pixmap)
+            painter.setRenderHint(QPainter.Antialiasing)
+            draw_icon(painter, name, QPointF(10, 10), 17, colour, 1.6)
+            painter.end()
+            self.nav.item(row).setIcon(QIcon(pixmap))
+
     def _on_setting(self, key: str) -> None:
         if key in RESTYLE_KEYS:
             self.setStyleSheet(stylesheet())
+            self._paint_nav_icons()
             self._refresh_swatches()
             self.update()
         if key in ("output_mode", "output_subfolder", "output_custom", "overwrite", "*"):
@@ -369,6 +385,8 @@ class SettingsWindow(QDialog):
         shape.add("First ring", "Which ring opens first",
                   _segmented((("convert", "Convert"), ("tools", "Tools")), "start_page"))
         shape.add("Icons on tool wedges", "", _toggle("show_icons"))
+        shape.add("Colour by file type", "Images blue, video purple, audio green, documents gold",
+                  _toggle("type_colors"))
 
         motion = self._section(layout, "Motion")
         motion.add("Animation", "", _segmented((("off", "Off"), ("fast", "Fast"), ("normal", "Normal"),
@@ -443,7 +461,7 @@ class SettingsWindow(QDialog):
         self._refresh_swatches()
 
     def _custom_accent(self) -> None:
-        colour = QColorDialog.getColor(QColor(str(settings.get("accent"))), self, "Accent colour")
+        colour = pick_colour(self, QColor(str(settings.get("accent"))), "Accent colour")
         if colour.isValid():
             self._set_accent(colour.name())
 
@@ -903,9 +921,8 @@ class SettingsWindow(QDialog):
         return scroll
 
     def _reset_all(self) -> None:
-        answer = QMessageBox.question(self, "Reset all settings",
-                                      "Put every Satsuma setting back to its default?",
-                                      QMessageBox.Reset | QMessageBox.Cancel, QMessageBox.Cancel)
-        if answer == QMessageBox.Reset:
+        if confirm(self, "Reset all settings",
+                   "Put every Satsuma setting back to its default? Watched folders are removed too.",
+                   "Reset everything", danger=True):
             settings.reset(list(DEFAULTS))
             self._rebuild()
