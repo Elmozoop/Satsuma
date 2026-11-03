@@ -1,25 +1,34 @@
-"""Settings: Look & feel (with live preview), Actions, Trigger & saving, Converters."""
+"""Settings: Appearance (with live preview), Ring actions, Trigger, Saving, Converters, About."""
 from __future__ import annotations
 
-from PySide6.QtCore import QPointF, QRectF, QSize, Qt, QThread, Signal
-from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
-from PySide6.QtWidgets import (QAbstractItemView, QButtonGroup, QCheckBox, QColorDialog, QComboBox,
-                               QDialog, QFileDialog, QFormLayout, QGridLayout, QGroupBox,
-                               QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem,
-                               QProgressBar, QPushButton, QSlider, QSpinBox, QTabWidget,
-                               QToolButton, QVBoxLayout, QWidget)
+from functools import partial
+from pathlib import Path
+
+from PySide6.QtCore import QPointF, QRectF, QSize, Qt, QThread, QUrl, Signal
+from PySide6.QtGui import QColor, QDesktopServices, QFont, QIcon, QPainter, QPen, QPixmap
+from PySide6.QtWidgets import (QAbstractItemView, QButtonGroup, QColorDialog, QComboBox, QDialog,
+                               QFileDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
+                               QListWidget, QListWidgetItem, QMessageBox, QProgressBar, QPushButton,
+                               QScrollArea, QSlider, QSpinBox, QStackedWidget, QStyle,
+                               QStyledItemDelegate, QStyleOptionViewItem, QToolButton, QVBoxLayout,
+                               QWidget)
 
 from .. import winutil
 from ..actions import catalogue
-from ..config import BIN_DIR, VERSION, settings
+from ..config import BIN_DIR, DATA_DIR, DEFAULTS, LOG_FILE, VERSION, settings
 from ..engine import documents
 from ..engine import ffmpeg_tool as ff
+from ..engine.paths import open_file
+from .controls import Segmented, Toggle, stylesheet
 from .icons import draw_icon
-from .preview import RadialPreview
-from .theme import ACCENT_PRESETS, readable_on
+from .preview import SAMPLES, RadialPreview
+from .theme import ACCENT_PRESETS, palette, readable_on
 
 LOOK_KEYS = ["theme", "accent", "menu_scale", "glass_opacity", "anim_speed", "bounce", "show_icons",
              "show_captions", "hub_info", "wedges_per_ring", "hub_switch_ms", "start_page"]
+PROJECT_URL = "https://github.com/Elmozoop/Satsuma"
+PAGES = ["Appearance", "Ring actions", "Trigger", "Saving", "Converters", "About"]
+RESTYLE_KEYS = {"theme", "accent", "*"}
 
 
 class _FFmpegFetcher(QThread):
@@ -34,20 +43,17 @@ class _FFmpegFetcher(QThread):
             self.done.emit(False, str(exc))
 
 
-def _combo(options, key: str) -> QComboBox:
-    box = QComboBox()
-    for value, label in options:
-        box.addItem(label, value)
-    box.setCurrentIndex(max(0, box.findData(settings.get(key))))
-    box.currentIndexChanged.connect(lambda _i: settings.set(key, box.currentData()))
-    return box
+# ----------------------------------------------------------------------------- bound controls
+def _segmented(options, key: str) -> Segmented:
+    control = Segmented(options, settings.get(key))
+    control.changed.connect(lambda v: settings.set(key, v))
+    return control
 
 
-def _check(text: str, key: str) -> QCheckBox:
-    box = QCheckBox(text)
-    box.setChecked(bool(settings.get(key)))
-    box.toggled.connect(lambda v: settings.set(key, v))
-    return box
+def _toggle(key: str) -> Toggle:
+    control = Toggle(bool(settings.get(key)))
+    control.toggled.connect(lambda v: settings.set(key, v))
+    return control
 
 
 def _slider(key: str, low: int, high: int, factor: float = 1.0, suffix: str = "",
@@ -59,8 +65,10 @@ def _slider(key: str, low: int, high: int, factor: float = 1.0, suffix: str = ""
     slider = QSlider(Qt.Horizontal)
     slider.setRange(low, high)
     slider.setValue(round(float(settings.get(key)) / factor))
+    slider.setFixedWidth(200)
     value = QLabel()
-    value.setMinimumWidth(48)
+    value.setObjectName("value")
+    value.setMinimumWidth(52)
     value.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
 
     def show(v: int) -> None:
@@ -77,68 +85,259 @@ def _slider(key: str, low: int, high: int, factor: float = 1.0, suffix: str = ""
     else:
         slider.sliderReleased.connect(lambda: store(slider.value()))
         slider.valueChanged.connect(lambda v: None if slider.isSliderDown() else store(v))
-    layout.addWidget(slider, 1)
+    layout.addWidget(slider)
     layout.addWidget(value)
     row.slider = slider
     return row
 
 
 def _swatch_icon(color: QColor, selected: bool) -> QIcon:
-    """A colour dot; a tick marks the current accent."""
-    pixmap = QPixmap(56, 56)
+    """A colour dot; a ring and a tick mark the current accent."""
+    pixmap = QPixmap(64, 64)
     pixmap.setDevicePixelRatio(2.0)
     pixmap.fill(Qt.transparent)
     painter = QPainter(pixmap)
     painter.setRenderHint(QPainter.Antialiasing)
+    if selected:
+        painter.setPen(QPen(color, 2))
+        painter.setBrush(Qt.NoBrush)
+        painter.drawEllipse(QRectF(2, 2, 28, 28))
     painter.setPen(Qt.NoPen)
     painter.setBrush(color)
-    painter.drawEllipse(QRectF(3, 3, 22, 22))
+    painter.drawEllipse(QRectF(6, 6, 20, 20))
     if selected:
-        tick = readable_on(color)
-        painter.setPen(QPen(tick, 2.2, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
-        painter.setBrush(Qt.NoBrush)
-        painter.drawPolyline([QPointF(9, 14.5), QPointF(12.5, 18), QPointF(19, 10.5)])
+        painter.setPen(QPen(readable_on(color), 2.2, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+        painter.drawPolyline([QPointF(11.5, 16.5), QPointF(14.5, 19.5), QPointF(20.5, 12.5)])
     painter.end()
     return QIcon(pixmap)
 
 
+def _label(text: str, name: str, wrap: bool = False) -> QLabel:
+    label = QLabel(text)
+    label.setObjectName(name)
+    label.setWordWrap(wrap)
+    return label
+
+
+class _Card(QFrame):
+    """A rounded panel of setting rows: title and explanation on the left, control on the right."""
+
+    def __init__(self):
+        super().__init__()
+        self.setObjectName("card")
+        self._layout = QVBoxLayout(self)
+        self._layout.setContentsMargins(0, 0, 0, 0)
+        self._layout.setSpacing(0)
+
+    def add(self, title: str, hint: str = "", control: QWidget | None = None) -> QWidget:
+        if self._layout.count():
+            sep = QFrame()
+            sep.setObjectName("sep")
+            self._layout.addWidget(sep)
+        row = QWidget()
+        layout = QHBoxLayout(row)
+        layout.setContentsMargins(16, 10, 14, 10)
+        layout.setSpacing(16)
+        text = QVBoxLayout()
+        text.setSpacing(1)
+        text.addWidget(_label(title, "rowTitle"))
+        row.hint = _label(hint, "rowHint", wrap=True)
+        row.hint.setVisible(bool(hint))
+        text.addWidget(row.hint)
+        row.text = text
+        layout.addLayout(text, 1)
+        if control is not None:
+            layout.addWidget(control, 0, Qt.AlignVCenter | Qt.AlignRight)
+        row.setMinimumHeight(54)
+        self._layout.addWidget(row)
+        # Hide the row together with the separator above it.
+        row.separator = sep if self._layout.count() > 1 else None
+        return row
+
+    def add_widget(self, widget: QWidget) -> None:
+        self._layout.addWidget(widget)
+
+
+def _set_row_visible(row: QWidget, visible: bool) -> None:
+    row.setVisible(visible)
+    if row.separator is not None:
+        row.separator.setVisible(visible)
+
+
+class _ActionDelegate(QStyledItemDelegate):
+    """Action rows: icon, label, caption and which ring the action lives on."""
+
+    def paint(self, painter: QPainter, option, index) -> None:
+        opt = QStyleOptionViewItem(option)
+        self.initStyleOption(opt, index)
+        label, caption, ring = index.data(Qt.UserRole + 1)
+        opt.text = ""
+        widget = option.widget
+        style = widget.style()
+        text_rect = style.subElementRect(QStyle.SE_ItemViewItemText, opt, widget)
+        box = QRectF(style.subElementRect(QStyle.SE_ItemViewItemCheckIndicator, opt, widget))
+        # Draw our own checkbox in the accent colour; clicks still hit the style's indicator rect.
+        opt.features &= ~QStyleOptionViewItem.HasCheckIndicator
+        style.drawControl(QStyle.CE_ItemViewItem, opt, painter, widget)
+        pal = palette()
+        shown = Qt.CheckState(index.data(Qt.CheckStateRole)) == Qt.Checked
+        painter.save()
+        painter.setRenderHint(QPainter.Antialiasing)
+        box = QRectF(0, 0, 18, 18).translated(box.center() - QPointF(9, 9))
+        if shown:
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(pal.accent)
+            painter.drawRoundedRect(box, 5, 5)
+            painter.setPen(QPen(pal.on_accent, 2, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+            c = box.center()
+            painter.drawPolyline([c + QPointF(-4.5, 0.5), c + QPointF(-1.5, 3.5), c + QPointF(4.5, -3.5)])
+        else:
+            painter.setPen(QPen(pal.muted, 1.4))
+            painter.setBrush(Qt.NoBrush)
+            painter.drawRoundedRect(box.adjusted(0.7, 0.7, -0.7, -0.7), 5, 5)
+        painter.setOpacity(1.0 if shown else 0.45)
+        bold = QFont(opt.font)
+        bold.setWeight(QFont.DemiBold)
+        painter.setFont(bold)
+        painter.setPen(pal.text)
+        label_rect = text_rect.adjusted(4, 0, 0, 0)
+        painter.drawText(label_rect, Qt.AlignVCenter | Qt.AlignLeft, label)
+        width = painter.fontMetrics().horizontalAdvance(label)
+        painter.setFont(opt.font)
+        painter.setPen(pal.muted)
+        painter.drawText(label_rect.adjusted(width + 12, 0, -96, 0), Qt.AlignVCenter | Qt.AlignLeft,
+                         caption)
+        # Ring chip on the right
+        chip = QRectF(text_rect.right() - 86, text_rect.center().y() - 10, 80, 20)
+        tint = QColor(pal.accent if ring == "Convert" else pal.muted)
+        tint.setAlphaF(0.18)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(tint)
+        painter.drawRoundedRect(chip, 10, 10)
+        painter.setPen(pal.accent if ring == "Convert" else pal.text)
+        small = QFont(opt.font)
+        small.setPointSizeF(max(7.0, opt.font.pointSizeF() - 1.5))
+        painter.setFont(small)
+        painter.drawText(chip, Qt.AlignCenter, f"{ring} ring")
+        painter.restore()
+
+    def sizeHint(self, option, index) -> QSize:
+        return QSize(0, 36)
+
+
+# ----------------------------------------------------------------------------- the window
 class SettingsWindow(QDialog):
     def __init__(self):
         super().__init__(None)
         self.setWindowTitle("Satsuma Settings")
-        self.setWindowFlags(Qt.Dialog | Qt.WindowCloseButtonHint | Qt.WindowMinimizeButtonHint)
-        self.resize(860, 600)
-        root = QVBoxLayout(self)
-        self.tabs = QTabWidget()
-        root.addWidget(self.tabs)
-        self.tabs.addTab(self._look_tab(), "Look && feel")
-        self.tabs.addTab(self._actions_tab(), "Actions")
-        self.tabs.addTab(self._trigger_tab(), "Trigger && saving")
-        self.tabs.addTab(self._converters_tab(), "Converters")
-        footer = QLabel(f"Satsuma {VERSION}")
-        footer.setStyleSheet("color:gray")
-        root.addWidget(footer, alignment=Qt.AlignRight)
+        self.setWindowFlags(Qt.Dialog | Qt.WindowCloseButtonHint | Qt.WindowMinimizeButtonHint
+                            | Qt.WindowMaximizeButtonHint)
+        self.resize(1080, 700)
+        self.setMinimumSize(900, 560)
         self._fetcher: _FFmpegFetcher | None = None
+
+        root = QHBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        sidebar = QWidget()
+        sidebar.setObjectName("sidebar")
+        sidebar.setAttribute(Qt.WA_StyledBackground, True)
+        sidebar.setFixedWidth(210)
+        side = QVBoxLayout(sidebar)
+        side.setContentsMargins(12, 18, 12, 14)
+        side.addWidget(_label("🍊  Satsuma", "brand"))
+        self.nav = QListWidget()
+        self.nav.setObjectName("nav")
+        for name in PAGES:
+            self.nav.addItem(name)
+        side.addWidget(self.nav, 1)
+        side.addWidget(_label(f"Version {VERSION}", "hint"))
+        root.addWidget(sidebar)
+
+        self.stack = QStackedWidget()
+        root.addWidget(self.stack, 1)
+        self._build_pages()
+        self.nav.currentRowChanged.connect(self.stack.setCurrentIndex)
+        self.nav.setCurrentRow(0)
+
+        self.setStyleSheet(stylesheet())
+        listener = self._on_setting
+        settings.subscribe(listener)
+        self.destroyed.connect(partial(settings.unsubscribe, listener))
 
     @property
     def busy(self) -> bool:
         """True while a background FFmpeg download still reports to this window."""
         return bool(self._fetcher and self._fetcher.isRunning())
 
-    # ================================================================== Look & feel
-    def _look_tab(self) -> QWidget:
-        tab = QWidget()
-        layout = QHBoxLayout(tab)
+    def _on_setting(self, key: str) -> None:
+        if key in RESTYLE_KEYS:
+            self.setStyleSheet(stylesheet())
+            self._refresh_swatches()
+            self.update()
+        if key in ("output_mode", "output_subfolder", "output_custom", "overwrite", "*"):
+            self._refresh_example()
 
-        left = QVBoxLayout()
+    def _build_pages(self) -> None:
+        builders = [self._appearance_page, self._actions_page, self._trigger_page,
+                    self._saving_page, self._converters_page, self._about_page]
+        for build in builders:
+            self.stack.addWidget(build())
+
+    def _rebuild(self) -> None:
+        """Recreate every page so each control shows the stored values again."""
+        index = self.stack.currentIndex()
+        while self.stack.count():
+            page = self.stack.widget(0)
+            self.stack.removeWidget(page)
+            page.deleteLater()
+        self._build_pages()
+        self.stack.setCurrentIndex(index)
+        self.setStyleSheet(stylesheet())
+
+    @staticmethod
+    def _page(title: str, subtitle: str = "") -> tuple[QScrollArea, QVBoxLayout]:
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        body = QWidget()
+        body.setObjectName("page")
+        layout = QVBoxLayout(body)
+        layout.setContentsMargins(28, 22, 28, 24)
+        layout.setSpacing(8)
+        layout.addWidget(_label(title, "pageTitle"))
+        if subtitle:
+            layout.addWidget(_label(subtitle, "hint", wrap=True))
+        scroll.setWidget(body)
+        return scroll, layout
+
+    @staticmethod
+    def _section(layout: QVBoxLayout, title: str) -> _Card:
+        layout.addWidget(_label(title, "cardTitle"))
+        card = _Card()
+        layout.addWidget(card)
+        return card
+
+    # ================================================================== Appearance
+    def _appearance_page(self) -> QWidget:
+        page = QWidget()
+        outer = QHBoxLayout(page)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        preview_panel = QWidget()
+        preview_panel.setFixedWidth(340)
+        left = QVBoxLayout(preview_panel)
+        left.setContentsMargins(24, 24, 4, 24)
         self.preview = RadialPreview()
+        self.preview.setMinimumSize(300, 300)
         left.addWidget(self.preview, 1)
         controls = QHBoxLayout()
         self.preview_kind = QComboBox()
-        for kind, label in (("image", "Preview: image"), ("video", "Preview: video"),
-                            ("audio", "Preview: audio"), ("pdf", "Preview: PDF"),
-                            ("document", "Preview: document")):
-            self.preview_kind.addItem(label, kind)
+        for kind, label in (("image", "Image"), ("video", "Video"), ("audio", "Audio"),
+                            ("pdf", "PDF"), ("document", "Document")):
+            self.preview_kind.addItem(f"Preview: {label}", kind)
         self.preview_kind.currentIndexChanged.connect(
             lambda _i: self.preview.set_kind(self.preview_kind.currentData()))
         replay = QPushButton("Replay")
@@ -146,59 +345,53 @@ class SettingsWindow(QDialog):
         controls.addWidget(self.preview_kind, 1)
         controls.addWidget(replay)
         left.addLayout(controls)
-        hint = QLabel("Hover the preview to try it. Click the centre to swap rings.")
-        hint.setStyleSheet("color:gray")
-        hint.setWordWrap(True)
-        left.addWidget(hint)
-        layout.addLayout(left, 5)
+        left.addWidget(_label("Hover the preview to try it. Click the centre to swap rings.", "hint", wrap=True))
+        outer.addWidget(preview_panel)
 
-        right = QVBoxLayout()
-        colours = QGroupBox("Colour")
-        form = QFormLayout(colours)
-        form.addRow("Theme", _combo((("system", "Match Windows"), ("dark", "Dark"), ("light", "Light")), "theme"))
-        form.addRow("Accent", self._accent_picker())
-        form.addRow("Glass", _slider("glass_opacity", 35, 100, 0.01, "%"))
-        right.addWidget(colours)
+        scroll, layout = self._page("Appearance", "Changes show in the preview straight away.")
+        colour = self._section(layout, "Colour")
+        colour.add("Theme", "", _segmented((("system", "System"), ("light", "Light"), ("dark", "Dark")),
+                                            "theme"))
+        colour.add("Accent", "", self._accent_picker())
+        colour.add("Glass", "How solid the ring is", _slider("glass_opacity", 35, 100, 0.01, "%"))
 
-        shape = QGroupBox("Shape")
-        form = QFormLayout(shape)
-        form.addRow("Size", _slider("menu_scale", 70, 150, 0.01, "%", live=False))
+        shape = self._section(layout, "Shape")
+        shape.add("Size", "", _slider("menu_scale", 70, 150, 0.01, "%", live=False))
         spin = QSpinBox()
         spin.setRange(3, 10)
         spin.setValue(int(settings.get("wedges_per_ring")))
+        spin.setFixedWidth(72)
         spin.valueChanged.connect(lambda v: settings.set("wedges_per_ring", v))
-        form.addRow("Wedges per ring", spin)
-        form.addRow("First ring", _combo((("convert", "Convert"), ("tools", "Tools")), "start_page"))
-        form.addRow(_check("Show icons on tool wedges", "show_icons"))
-        right.addWidget(shape)
+        shape.add("Wedges per ring", "Extra actions spill onto another ring", spin)
+        shape.add("First ring", "Which ring opens first",
+                  _segmented((("convert", "Convert"), ("tools", "Tools")), "start_page"))
+        shape.add("Icons on tool wedges", "", _toggle("show_icons"))
 
-        motion = QGroupBox("Motion")
-        form = QFormLayout(motion)
-        form.addRow("Animation", _combo((("fast", "Fast"), ("normal", "Normal"), ("relaxed", "Relaxed"),
-                                         ("off", "Off")), "anim_speed"))
-        form.addRow(_check("Springy bounce", "bounce"))
-        form.addRow("Hold centre to swap", _slider("hub_switch_ms", 150, 1500, 1.0, " ms"))
-        right.addWidget(motion)
+        motion = self._section(layout, "Motion")
+        motion.add("Animation", "", _segmented((("off", "Off"), ("fast", "Fast"), ("normal", "Normal"),
+                                                ("relaxed", "Relaxed")), "anim_speed"))
+        motion.add("Springy bounce", "A little overshoot as the ring opens", _toggle("bounce"))
+        motion.add("Hold centre to swap", "Rest on the centre this long to switch rings",
+                   _slider("hub_switch_ms", 150, 1500, 1.0, " ms"))
 
-        centre = QGroupBox("Centre")
-        form = QFormLayout(centre)
-        form.addRow("Shows", _combo((("size", "File size"), ("name", "File name"), ("type", "File type")),
-                                    "hub_info"))
-        form.addRow(_check("Describe the action under the cursor", "show_captions"))
-        right.addWidget(centre)
+        centre = self._section(layout, "Centre")
+        centre.add("Shows", "", _segmented((("size", "Size"), ("name", "Name"), ("type", "Type")),
+                                           "hub_info"))
+        centre.add("Describe the action under the cursor", "", _toggle("show_captions"))
 
-        reset = QPushButton("Reset look to defaults")
+        reset = QPushButton("Reset appearance")
         reset.clicked.connect(self._reset_look)
-        right.addWidget(reset, alignment=Qt.AlignRight)
-        right.addStretch(1)
-        layout.addLayout(right, 4)
-        return tab
+        layout.addSpacing(8)
+        layout.addWidget(reset, alignment=Qt.AlignRight)
+        layout.addStretch(1)
+        outer.addWidget(scroll, 1)
+        return page
 
     def _accent_picker(self) -> QWidget:
         row = QWidget()
         grid = QGridLayout(row)
         grid.setContentsMargins(0, 0, 0, 0)
-        grid.setSpacing(2)
+        grid.setSpacing(0)
         self._swatches = QButtonGroup(row)
         self._swatches.setExclusive(True)
         for i, (name, hex_) in enumerate(ACCENT_PRESETS):
@@ -206,13 +399,19 @@ class SettingsWindow(QDialog):
             button.setToolTip(name)
             button.setCheckable(True)
             button.setAutoRaise(True)
-            button.setIconSize(QSize(28, 28))
+            button.setCursor(Qt.PointingHandCursor)
+            button.setIconSize(QSize(30, 30))
+            button.setStyleSheet("QToolButton { border: none; background: transparent; padding: 0; }")
             button.setProperty("hex", hex_)
             button.clicked.connect(lambda _c=False, h=hex_: self._set_accent(h))
             self._swatches.addButton(button)
             grid.addWidget(button, 0, i)
         custom = QToolButton()
-        custom.setText("Custom…")
+        custom.setToolTip("Pick any colour")
+        custom.setText("+")
+        custom.setCursor(Qt.PointingHandCursor)
+        custom.setIconSize(QSize(30, 30))
+        custom.setStyleSheet("QToolButton { border: none; background: transparent; font-size: 14pt; }")
         custom.clicked.connect(self._custom_accent)
         grid.addWidget(custom, 0, len(ACCENT_PRESETS))
         self._custom_button = custom
@@ -220,15 +419,21 @@ class SettingsWindow(QDialog):
         return row
 
     def _refresh_swatches(self) -> None:
-        current = str(settings.get("accent")).upper()
-        for button in self._swatches.buttons():
-            hex_ = button.property("hex")
-            selected = hex_.upper() == current
-            button.setChecked(selected)
-            button.setIcon(_swatch_icon(QColor(hex_), selected))
-        is_custom = all(h.upper() != current for _n, h in ACCENT_PRESETS)
-        self._custom_button.setIcon(_swatch_icon(QColor(current), True) if is_custom else QIcon())
-        self._custom_button.setToolButtonStyle(Qt.ToolButtonTextBesideIcon if is_custom else Qt.ToolButtonTextOnly)
+        if not hasattr(self, "_custom_button"):
+            return
+        try:
+            current = str(settings.get("accent")).upper()
+            for button in self._swatches.buttons():
+                hex_ = button.property("hex")
+                selected = hex_.upper() == current
+                button.setChecked(selected)
+                button.setIcon(_swatch_icon(QColor(hex_), selected))
+            is_custom = all(h.upper() != current for _n, h in ACCENT_PRESETS)
+            self._custom_button.setIcon(_swatch_icon(QColor(current), True) if is_custom else QIcon())
+            self._custom_button.setToolButtonStyle(Qt.ToolButtonIconOnly if is_custom
+                                                   else Qt.ToolButtonTextOnly)
+        except RuntimeError:   # the page was rebuilt; its buttons are gone
+            pass
 
     def _set_accent(self, hex_: str) -> None:
         settings.set("accent", hex_.upper())
@@ -241,19 +446,18 @@ class SettingsWindow(QDialog):
 
     def _reset_look(self) -> None:
         settings.reset(LOOK_KEYS)
-        # Rebuild the tab so every control shows the defaults again.
-        index = self.tabs.currentIndex()
-        self.tabs.removeTab(0)
-        self.tabs.insertTab(0, self._look_tab(), "Look && feel")
-        self.tabs.setCurrentIndex(index)
+        self._rebuild()
 
-    # ================================================================== Actions
-    def _actions_tab(self) -> QWidget:
-        tab = QWidget()
-        layout = QVBoxLayout(tab)
+    # ================================================================== Ring actions
+    def _actions_page(self) -> QWidget:
+        scroll, layout = self._page(
+            "Ring actions",
+            "Choose what appears in the ring for each kind of file. Drag rows to reorder them. "
+            "Convert and Tools actions sit on separate rings; rest on the centre to swap between them.")
         top = QHBoxLayout()
-        top.addWidget(QLabel("When I drag"))
+        top.addWidget(_label("When I drag", "rowTitle"))
         self.action_kind = QComboBox()
+        self.action_kind.setMinimumWidth(180)
         self._catalogue = catalogue()
         for category, label, _actions in self._catalogue:
             self.action_kind.addItem(label, category)
@@ -263,36 +467,51 @@ class SettingsWindow(QDialog):
         layout.addLayout(top)
 
         body = QHBoxLayout()
+        body.setSpacing(16)
+        column = QVBoxLayout()
         self.action_list = QListWidget()
+        self.action_list.setObjectName("actions")
+        self.action_list.setItemDelegate(_ActionDelegate(self.action_list))
         self.action_list.setDragDropMode(QAbstractItemView.InternalMove)
         self.action_list.setDefaultDropAction(Qt.MoveAction)
         self.action_list.setSelectionMode(QAbstractItemView.SingleSelection)
         self.action_list.setIconSize(QSize(18, 18))
+        self.action_list.setMinimumHeight(340)
         self.action_list.itemChanged.connect(lambda _i: self._save_action_list())
         self.action_list.model().rowsMoved.connect(lambda *_a: self._save_action_list())
-        body.addWidget(self.action_list, 1)
+        column.addWidget(self.action_list, 1)
 
-        buttons = QVBoxLayout()
-        up = QPushButton("Move up")
-        down = QPushButton("Move down")
-        up.clicked.connect(lambda: self._move_selected(-1))
-        down.clicked.connect(lambda: self._move_selected(1))
-        reset = QPushButton("Reset this type")
-        reset.clicked.connect(self._reset_action_list)
-        for button in (up, down):
+        buttons = QHBoxLayout()
+        for text, handler in (("↑", lambda: self._move_selected(-1)), ("↓", lambda: self._move_selected(1))):
+            button = QPushButton(text)
+            button.setFixedWidth(40)
+            button.setToolTip("Move up" if text == "↑" else "Move down")
+            button.clicked.connect(handler)
+            buttons.addWidget(button)
+        buttons.addSpacing(8)
+        for text, checked in (("Show all", True), ("Hide all", False)):
+            button = QPushButton(text)
+            button.clicked.connect(lambda _c=False, v=checked: self._check_all(v))
             buttons.addWidget(button)
         buttons.addStretch(1)
+        reset = QPushButton("Reset")
+        reset.setToolTip("Default actions and order for this kind of file")
+        reset.clicked.connect(self._reset_action_list)
         buttons.addWidget(reset)
-        body.addLayout(buttons)
-        layout.addLayout(body, 1)
+        column.addLayout(buttons)
+        body.addLayout(column, 3)
 
-        note = QLabel("Tick what appears in the ring, drag to change the order. Convert actions and "
-                      "tools sit on separate rings; rest on the centre while dragging to swap between them.")
-        note.setWordWrap(True)
-        note.setStyleSheet("color:gray")
-        layout.addWidget(note)
+        preview_column = QVBoxLayout()
+        self.actions_preview = RadialPreview()
+        self.actions_preview.setMinimumSize(300, 300)
+        preview_column.addWidget(self.actions_preview, 1)
+        self.actions_preview_note = _label("", "hint", wrap=True)
+        self.actions_preview_note.setAlignment(Qt.AlignCenter)
+        preview_column.addWidget(self.actions_preview_note)
+        body.addLayout(preview_column, 2)
+        layout.addLayout(body, 1)
         self._load_action_list()
-        return tab
+        return scroll
 
     def _current_actions(self):
         category = self.action_kind.currentData()
@@ -307,12 +526,14 @@ class SettingsWindow(QDialog):
         order = (settings.get("actions_order") or {}).get(category) or []
         rank = {a: i for i, a in enumerate(order)}
         ordered = sorted(actions, key=lambda a: (0, rank[a.id]) if a.id in rank else (1, actions.index(a)))
+        colour = palette().text
         self.action_list.blockSignals(True)
         self.action_list.clear()
         for action in ordered:
             ring = "Convert" if action.group == "convert" else "Tools"
-            item = QListWidgetItem(f"{action.label}   —   {action.caption}   ·   {ring} ring")
+            item = QListWidgetItem(f"{action.label} — {action.caption}")   # used for accessibility
             item.setData(Qt.UserRole, action.id)
+            item.setData(Qt.UserRole + 1, (action.label, action.caption, ring))
             item.setFlags(item.flags() | Qt.ItemIsUserCheckable | Qt.ItemIsDragEnabled)
             item.setFlags(item.flags() & ~Qt.ItemIsDropEnabled)
             item.setCheckState(Qt.Unchecked if f"{category}:{action.id}" in hidden else Qt.Checked)
@@ -323,15 +544,24 @@ class SettingsWindow(QDialog):
             if action.icon:
                 painter = QPainter(pixmap)
                 painter.setRenderHint(QPainter.Antialiasing)
-                draw_icon(painter, action.icon, QPointF(9, 9), 16, self.palette().text().color(), 1.6)
+                draw_icon(painter, action.icon, QPointF(9, 9), 16, colour, 1.6)
                 painter.end()
             item.setIcon(QIcon(pixmap))
-            item.setSizeHint(QSize(0, 30))
             self.action_list.addItem(item)
         self.action_list.blockSignals(False)
+        self._update_actions_preview(category)
+
+    def _update_actions_preview(self, category: str) -> None:
+        if category in SAMPLES:
+            self.actions_preview.show()
+            self.actions_preview.set_kind(category)
+            self.actions_preview_note.setText(f"Dragging “{SAMPLES[category][0]}”")
+        else:
+            self.actions_preview.hide()
+            self.actions_preview_note.setText("No preview for a mix of file types.")
 
     def _save_action_list(self) -> None:
-        category, actions = self._current_actions()
+        category, _actions = self._current_actions()
         ids = [self.action_list.item(i).data(Qt.UserRole) for i in range(self.action_list.count())]
         unchecked = {self.action_list.item(i).data(Qt.UserRole) for i in range(self.action_list.count())
                      if self.action_list.item(i).checkState() != Qt.Checked}
@@ -341,6 +571,14 @@ class SettingsWindow(QDialog):
         order[category] = ids
         settings.set("actions_order", order)
         settings.set("actions_hidden", hidden)
+
+    def _check_all(self, checked: bool) -> None:
+        self.action_list.blockSignals(True)
+        for i in range(self.action_list.count()):
+            self.action_list.item(i).setCheckState(Qt.Checked if checked else Qt.Unchecked)
+        self.action_list.blockSignals(False)
+        self.action_list.viewport().update()
+        self._save_action_list()
 
     def _move_selected(self, step: int) -> None:
         row = self.action_list.currentRow()
@@ -361,75 +599,31 @@ class SettingsWindow(QDialog):
         settings.set("actions_hidden", hidden)
         self._load_action_list()
 
-    # ================================================================== Trigger & saving
-    def _trigger_tab(self) -> QWidget:
-        tab = QWidget()
-        root = QVBoxLayout(tab)
+    # ================================================================== Trigger
+    def _trigger_page(self) -> QWidget:
+        scroll, layout = self._page("Trigger", "How the ring opens while you drag files.")
+        drag = self._section(layout, "Dragging")
+        drag.add("Open the ring while dragging files", "Hold the key below as you drag",
+                 _toggle("enabled"))
+        drag.add("Key to hold", "Shift is easiest; pick another if it clashes with an app",
+                 _segmented((("shift", "Shift"), ("ctrl", "Ctrl"), ("alt", "Alt")), "modifier"))
+        drag.add("Only for real file drags",
+                 "Ignore text selections and window moves; the ring appears once files arrive",
+                 _toggle("smart_detect"))
 
-        trigger = QGroupBox("Trigger")
-        form = QFormLayout(trigger)
-        form.addRow(_check("Open the menu when I drag files with a modifier key held", "enabled"))
-        form.addRow("Modifier key", _combo((("shift", "Shift"), ("ctrl", "Ctrl"), ("alt", "Alt")), "modifier"))
-        form.addRow(_check("Only for real file drags (ignore text selection, window moves)", "smart_detect"))
-        root.addWidget(trigger)
-
-        output = QGroupBox("Saving")
-        out_form = QFormLayout(output)
-        self.mode = QComboBox()
-        self.mode.addItem("Next to the original", "source")
-        self.mode.addItem("In a subfolder next to the original", "subfolder")
-        self.mode.addItem("In one folder I choose", "custom")
-        self.mode.setCurrentIndex(max(0, self.mode.findData(settings.get("output_mode"))))
-        out_form.addRow("Save results", self.mode)
-        self.subfolder = QLineEdit(str(settings.get("output_subfolder")))
-        self.subfolder.editingFinished.connect(
-            lambda: settings.set("output_subfolder", self.subfolder.text().strip() or "Converted"))
-        out_form.addRow("Subfolder name", self.subfolder)
-        custom_row = QWidget()
-        custom_layout = QHBoxLayout(custom_row)
-        custom_layout.setContentsMargins(0, 0, 0, 0)
-        self.custom = QLineEdit(str(settings.get("output_custom")))
-        self.custom.setPlaceholderText("Choose a folder…")
-        self.custom.editingFinished.connect(lambda: settings.set("output_custom", self.custom.text().strip()))
-        browse = QPushButton("Browse…")
-        browse.clicked.connect(self._browse)
-        custom_layout.addWidget(self.custom, 1)
-        custom_layout.addWidget(browse)
-        out_form.addRow("Folder", custom_row)
-        self.mode.currentIndexChanged.connect(self._mode_changed)
-        self._mode_changed()
-        out_form.addRow(_check("Overwrite files with the same name (otherwise add “(1)”)", "overwrite"))
-        out_form.addRow(_check("Show the result in File Explorer when done", "reveal_after"))
-        root.addWidget(output)
-
-        system = QGroupBox("Windows")
-        s_form = QFormLayout(system)
-        self.autostart = QCheckBox("Start Satsuma when I sign in")
-        self.autostart.setChecked(winutil.autostart_enabled())
+        system = self._section(layout, "Windows")
+        self.autostart = Toggle(winutil.autostart_enabled())
         self.autostart.toggled.connect(winutil.set_autostart)
-        self.sendto = QCheckBox("Add “Satsuma” to the right-click Send to menu")
-        self.sendto.setChecked(winutil.sendto_enabled())
+        system.add("Start when I sign in", "Satsuma waits quietly in the tray", self.autostart)
+        self.sendto = Toggle(winutil.sendto_enabled())
         self.sendto.toggled.connect(self._sendto_toggled)
+        system.add("Add to the “Send to” menu", "Right-click files → Send to → Satsuma opens the ring",
+                   self.sendto)
         if not winutil.IS_WINDOWS:
             self.autostart.setEnabled(False)
             self.sendto.setEnabled(False)
-        s_form.addRow(self.autostart)
-        s_form.addRow(self.sendto)
-        root.addWidget(system)
-        root.addStretch(1)
-        return tab
-
-    def _mode_changed(self) -> None:
-        mode = self.mode.currentData()
-        settings.set("output_mode", mode)
-        self.subfolder.setEnabled(mode == "subfolder")
-        self.custom.setEnabled(mode == "custom")
-
-    def _browse(self) -> None:
-        folder = QFileDialog.getExistingDirectory(self, "Save converted files to", self.custom.text())
-        if folder:
-            self.custom.setText(folder)
-            settings.set("output_custom", folder)
+        layout.addStretch(1)
+        return scroll
 
     def _sendto_toggled(self, enabled: bool) -> None:
         if not winutil.set_sendto(enabled):
@@ -437,50 +631,147 @@ class SettingsWindow(QDialog):
             self.sendto.setChecked(winutil.sendto_enabled())
             self.sendto.blockSignals(False)
 
-    # ================================================================== Converters
-    def _converters_tab(self) -> QWidget:
-        tab = QWidget()
-        root = QVBoxLayout(tab)
-        quality = QGroupBox("Quality")
-        q_form = QFormLayout(quality)
-        q_form.addRow("JPG / WEBP quality", _slider("jpeg_quality", 10, 100, live=False))
-        q_form.addRow("Compress quality", _slider("compress_quality", 10, 100, live=False))
-        root.addWidget(quality)
+    # ================================================================== Saving
+    def _saving_page(self) -> QWidget:
+        scroll, layout = self._page("Saving", "Your original file is never changed, moved or deleted.")
+        where = self._section(layout, "Where results go")
+        self.mode = QComboBox()
+        self.mode.addItem("Next to the original", "source")
+        self.mode.addItem("In a subfolder next to the original", "subfolder")
+        self.mode.addItem("In one folder I choose", "custom")
+        self.mode.setCurrentIndex(max(0, self.mode.findData(settings.get("output_mode"))))
+        self.mode.setMinimumWidth(260)
+        where.add("Save results", "", self.mode)
 
-        engines = QGroupBox("Converters")
-        e_layout = QVBoxLayout(engines)
-        ff_row = QHBoxLayout()
-        self.ff_label = QLabel()
+        self.subfolder = QLineEdit(str(settings.get("output_subfolder")))
+        self.subfolder.setFixedWidth(260)
+        self.subfolder.editingFinished.connect(
+            lambda: settings.set("output_subfolder", self.subfolder.text().strip() or "Converted"))
+        self._subfolder_row = where.add("Subfolder name", "Created next to each original", self.subfolder)
+
+        custom_row = QWidget()
+        custom_layout = QHBoxLayout(custom_row)
+        custom_layout.setContentsMargins(0, 0, 0, 0)
+        self.custom = QLineEdit(str(settings.get("output_custom")))
+        self.custom.setPlaceholderText("Choose a folder…")
+        self.custom.setFixedWidth(260)
+        self.custom.editingFinished.connect(lambda: settings.set("output_custom", self.custom.text().strip()))
+        browse = QPushButton("Browse…")
+        browse.clicked.connect(self._browse)
+        custom_layout.addWidget(self.custom)
+        custom_layout.addWidget(browse)
+        self._custom_row = where.add("Folder", "", custom_row)
+        self.mode.currentIndexChanged.connect(self._mode_changed)
+
+        self.example = _label("", "example", wrap=True)
+        example_box = QWidget()
+        example_layout = QVBoxLayout(example_box)
+        example_layout.setContentsMargins(16, 6, 14, 12)
+        example_layout.addWidget(self.example)
+        where.add_widget(example_box)
+
+        files = self._section(layout, "Files")
+        files.add("Replace files with the same name",
+                  "Off: add a number instead, like “photo (1).webp”", _toggle("overwrite"))
+        files.add("Show the result in File Explorer", "Opens the folder with the new file selected",
+                  _toggle("reveal_after"))
+        layout.addStretch(1)
+        self._mode_changed()
+        return scroll
+
+    def _mode_changed(self) -> None:
+        mode = self.mode.currentData()
+        if settings.get("output_mode") != mode:
+            settings.set("output_mode", mode)
+        _set_row_visible(self._subfolder_row, mode == "subfolder")
+        _set_row_visible(self._custom_row, mode == "custom")
+        self._refresh_example()
+
+    def _refresh_example(self) -> None:
+        if not hasattr(self, "example"):
+            return
+        try:
+            source = Path.home() / "Pictures" / "Holiday.png"
+            mode = settings.get("output_mode")
+            folder = source.parent
+            if mode == "subfolder":
+                folder = folder / str(settings.get("output_subfolder") or "Converted")
+            elif mode == "custom" and str(settings.get("output_custom") or "").strip():
+                folder = Path(str(settings.get("output_custom")).strip())
+            self.example.setText(f"Example:  {source}\n      →  {folder / 'Holiday.webp'}")
+        except RuntimeError:   # the page was rebuilt
+            pass
+
+    def _browse(self) -> None:
+        folder = QFileDialog.getExistingDirectory(self, "Save converted files to", self.custom.text())
+        if folder:
+            self.custom.setText(folder)
+            settings.set("output_custom", folder)
+
+    # ================================================================== Converters
+    def _converters_page(self) -> QWidget:
+        scroll, layout = self._page("Converters")
+        quality = self._section(layout, "Quality")
+        quality.add("JPG and WEBP quality", "Higher looks better; files get bigger",
+                    _slider("jpeg_quality", 10, 100, live=False))
+        quality.add("Compress strength", "Quality used by the Compress tools; lower means smaller files",
+                    _slider("compress_quality", 10, 100, live=False))
+
+        engines = self._section(layout, "Helpers")
+        ff_control = QWidget()
+        ff_layout = QHBoxLayout(ff_control)
+        ff_layout.setContentsMargins(0, 0, 0, 0)
+        self.ff_status = QLabel("●")
         self.ff_button = QPushButton("Download FFmpeg")
+        self.ff_button.setObjectName("primary")
         self.ff_button.clicked.connect(self._fetch_ffmpeg)
-        ff_row.addWidget(self.ff_label, 1)
-        ff_row.addWidget(self.ff_button)
-        e_layout.addLayout(ff_row)
+        ff_layout.addWidget(self.ff_status)
+        ff_layout.addWidget(self.ff_button)
+        ff_row = engines.add("Video and audio (FFmpeg)", "", ff_control)
+        self.ff_label = ff_row.hint
+        self.ff_label.show()
         self.ff_progress = QProgressBar()
         self.ff_progress.setRange(0, 1000)
+        self.ff_progress.setTextVisible(False)
         self.ff_progress.hide()
-        e_layout.addWidget(self.ff_progress)
+        ff_row.text.addWidget(self.ff_progress)
+
         lo = documents.libreoffice_path()
         office = any(documents.office_available(k) for k in ("word", "slides", "sheets"))
-        doc_text = ("Documents: LibreOffice found" if lo else
-                    "Documents: Microsoft Office (to PDF only)" if office else
-                    "Documents: install LibreOffice for Word/Excel/PowerPoint conversions")
-        e_layout.addWidget(QLabel(doc_text))
+        doc_ok = bool(lo or office)
+        doc_hint = ("LibreOffice found: every document conversion works" if lo else
+                    "Microsoft Office found: conversion to PDF works; LibreOffice adds the rest" if office
+                    else "Install LibreOffice (free) for Word, Excel and PowerPoint conversions")
+        doc_status = QLabel("●")
+        doc_status.setObjectName("dotOk" if doc_ok else "dotWarn")
+        doc_row = QWidget()
+        doc_layout = QHBoxLayout(doc_row)
+        doc_layout.setContentsMargins(0, 0, 0, 0)
+        doc_layout.addWidget(doc_status)
+        if not lo:
+            get = QPushButton("Get LibreOffice")
+            get.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("https://www.libreoffice.org/download/")))
+            doc_layout.addWidget(get)
+        engines.add("Office documents", doc_hint, doc_row)
+        layout.addStretch(1)
         self._refresh_ffmpeg()
-        root.addWidget(engines)
-        root.addStretch(1)
-        return tab
+        return scroll
 
     def _refresh_ffmpeg(self) -> None:
         path = ff.ffmpeg_path()
         if path:
-            self.ff_label.setText("Video & audio: FFmpeg ready")
+            self.ff_label.setText("Ready")
             self.ff_label.setToolTip(str(path))
+            self.ff_status.setObjectName("dotOk")
             self.ff_button.hide()
         else:
-            self.ff_label.setText("Video & audio: FFmpeg downloads on first use (100–200 MB)")
+            self.ff_label.setText("Downloads automatically the first time you need it (100–200 MB)")
             self.ff_label.setToolTip(f"Saved to {BIN_DIR}")
+            self.ff_status.setObjectName("dotWarn")
             self.ff_button.setVisible(winutil.IS_WINDOWS)
+        # Re-apply the stylesheet for the new object name.
+        self.ff_status.style().unpolish(self.ff_status)
+        self.ff_status.style().polish(self.ff_status)
 
     def _fetch_ffmpeg(self) -> None:
         if self._fetcher and self._fetcher.isRunning():
@@ -499,3 +790,35 @@ class SettingsWindow(QDialog):
         self._refresh_ffmpeg()
         if not ok:
             self.ff_label.setText(message.splitlines()[0])
+
+    # ================================================================== About
+    def _about_page(self) -> QWidget:
+        scroll, layout = self._page("About")
+        about = self._section(layout, f"Satsuma {VERSION}")
+        project = QPushButton("Open on GitHub")
+        project.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(PROJECT_URL)))
+        about.add("Drag-to-convert for Windows",
+                  "Everything runs on your PC. Files are never uploaded.", project)
+        log = QPushButton("Open log")
+        log.clicked.connect(lambda: open_file(LOG_FILE))
+        about.add("Something went wrong?", "The log has the details of every failed job", log)
+        data = QPushButton("Open folder")
+        data.clicked.connect(lambda: open_file(DATA_DIR))
+        about.add("Data folder", str(DATA_DIR), data)
+
+        danger = self._section(layout, "Reset")
+        reset = QPushButton("Reset everything")
+        reset.setObjectName("danger")
+        reset.clicked.connect(self._reset_all)
+        danger.add("Reset all settings", "Look, actions, trigger and saving go back to their defaults",
+                   reset)
+        layout.addStretch(1)
+        return scroll
+
+    def _reset_all(self) -> None:
+        answer = QMessageBox.question(self, "Reset all settings",
+                                      "Put every Satsuma setting back to its default?",
+                                      QMessageBox.Reset | QMessageBox.Cancel, QMessageBox.Cancel)
+        if answer == QMessageBox.Reset:
+            settings.reset(list(DEFAULTS))
+            self._rebuild()

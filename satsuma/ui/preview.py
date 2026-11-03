@@ -17,7 +17,8 @@ from .theme import is_dark
 
 SAMPLES = {"image": ("Holiday photo.png", 2_400_000), "video": ("Screen recording.mp4", 48_000_000),
            "audio": ("Voice note.wav", 5_300_000), "pdf": ("Lab report.pdf", 1_250_000),
-           "document": ("Notes.md", 12_000)}
+           "document": ("Notes.md", 12_000), "archive": ("Photos.zip", 84_000_000),
+           "other": ("Backup.dat", 640_000)}
 LAYOUT_KEYS = {"menu_scale", "wedges_per_ring", "start_page", "actions_hidden", "actions_order",
                "show_icons", "hub_info", "show_captions", "*"}
 REPLAY_KEYS = {"anim_speed", "bounce", "menu_scale", "*"}

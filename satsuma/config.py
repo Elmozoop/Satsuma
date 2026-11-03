@@ -8,7 +8,7 @@ from pathlib import Path
 
 APP_NAME = "Satsuma"
 APP_ID = "satsuma.win"
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 
 
 def _base_dir() -> Path:
