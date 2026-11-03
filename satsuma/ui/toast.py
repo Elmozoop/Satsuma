@@ -7,7 +7,7 @@ from pathlib import Path
 from PySide6.QtCore import QMimeData, QPoint, QPointF, QRectF, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import (QColor, QDrag, QFont, QFontMetrics, QGuiApplication, QPainter, QPainterPath, QPen,
                            QPixmap)
-from PySide6.QtWidgets import QApplication, QFileIconProvider, QWidget
+from PySide6.QtWidgets import QApplication, QWidget
 
 from .. import winutil
 from ..engine.paths import human_size, open_file, reveal, undo_targets
@@ -250,8 +250,12 @@ class Toasts(QWidget):
         mime.setUrls([QUrl.fromLocalFile(str(f)) for f in files])
         drag = QDrag(self)
         drag.setMimeData(mime)
-        icon = QFileIconProvider().icon(card.outputs[0].parent if len(files) > 1 else files[0])
-        drag.setPixmap(icon.pixmap(48, 48))
+        if card.thumb is not None:     # the result itself follows the pointer
+            picture = card.thumb.scaled(72, 72, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        else:
+            picture = thumbs.file_icon(files[0], 48)
+        drag.setPixmap(picture)
+        drag.setHotSpot(QPoint(picture.width() // 2, picture.height() // 2))
         drag.exec(Qt.CopyAction)   # always a copy: the result stays where it is
 
     def mouseMoveEvent(self, event) -> None:

@@ -118,6 +118,7 @@ class RadialView:
         self.confirm = Spring(0.0, "main")      # 0 → 1 as the finish tick plays on `chosen`
         self.thumb_fade = Spring(0.0, "main")
         self.glow = Spring(0.0, "hover")         # 0 → 1 while files are dragged over the ring
+        self._glow_clock = 0.0                   # drives the neon's gentle pulse
         self._thumb = None                       # None, "pending", "none" or a QPixmap
         self.empty_text = "Drop files here"
         self._paths_cache: dict = {}
@@ -309,6 +310,9 @@ class RadialView:
         moving = False
         for spring in (self.opening, self.page_pos, self.hub_fade, self.confirm, self.thumb_fade, self.glow):
             moving |= spring.step(dt)
+        if self.glow.target > 0:
+            self._glow_clock += dt
+            moving = True                        # keep pulsing while files hover over the ring
         for wedge in self.wedges:
             moving |= wedge.hover.step(dt)
             moving |= wedge.appear.step(dt)
@@ -547,25 +551,50 @@ class RadialView:
         self._paint_hub(painter, pal, dark, hub_r)
         painter.restore()
 
+    @staticmethod
+    def neon(accent: QColor) -> QColor:
+        """The accent pushed to full saturation and brightness: a fluorescent version of it."""
+        hue = accent.hsvHue()
+        if hue < 0:                              # a grey accent: glow white-blue instead
+            return QColor(150, 220, 255)
+        return QColor.fromHsv(hue, 255, 255)
+
     def _paint_glow(self, painter: QPainter, pal, r_out: float) -> None:
-        """An accent halo around the plate: "let go here"."""
+        """A neon rim around the plate: "let go here". Bloom, a saturated tube, a white-hot core."""
         s = self.scale
         g = max(0.0, min(1.0, self.glow.value))
+        pulse = 0.84 + 0.16 * math.sin(self._glow_clock * 2 * math.pi * 1.1)
+        g *= pulse if self.glow.target > 0 else 1.0
         plate_r = r_out + PLATE_PAD * s
-        outer = plate_r + 26 * s
-        halo = QRadialGradient(QPointF(0, 0), outer)
-        colour = QColor(pal.accent)
-        for stop, alpha in (((plate_r - 4 * s) / outer, 0.0), (plate_r / outer, 0.55 * g), (1.0, 0.0)):
-            colour.setAlphaF(alpha)
-            halo.setColorAt(stop, QColor(colour))
+        rim = plate_r + 1.5 * s
+        outer = plate_r + 32 * s                 # stays inside the window
+        tube = self.neon(pal.accent)
+
+        bloom = QRadialGradient(QPointF(0, 0), outer)
+        for stop, alpha in (((plate_r - 10 * s) / outer, 0.0), ((plate_r - 2 * s) / outer, 0.55),
+                            (rim / outer, 1.0), ((plate_r + 9 * s) / outer, 0.6),
+                            ((plate_r + 20 * s) / outer, 0.22), (1.0, 0.0)):
+            colour = QColor(tube)
+            colour.setAlphaF(min(1.0, alpha * g))
+            bloom.setColorAt(stop, colour)
         painter.setPen(Qt.NoPen)
-        painter.setBrush(QBrush(halo))
+        painter.setBrush(QBrush(bloom))
         painter.drawEllipse(QPointF(0, 0), outer, outer)
+
+        glass = QColor(tube)
+        glass.setAlphaF(min(1.0, 1.0 * g))
+        painter.setBrush(Qt.NoBrush)
+        painter.setPen(QPen(glass, 4.0 * s))
+        painter.drawEllipse(QPointF(0, 0), rim, rim)
+        core = _mix_color(tube, QColor(255, 255, 255), 0.7)
+        core.setAlphaF(min(1.0, 0.95 * g))
+        painter.setPen(QPen(core, 1.4 * s))
+        painter.drawEllipse(QPointF(0, 0), rim, rim)
 
     def _paint_ghost_ring(self, painter, pal, r_in, r_out, dark) -> None:
         s = self.scale
         g = max(0.0, min(1.0, self.glow.value))
-        pen = QPen(_mix_color(pal.muted, pal.accent, g), (1.2 + 1.0 * g) * s, Qt.DashLine)
+        pen = QPen(_mix_color(pal.muted, self.neon(pal.accent), g), (1.2 + 1.2 * g) * s, Qt.DashLine)
         pen.setDashPattern([3, 4])
         painter.setPen(pen)
         painter.setBrush(Qt.NoBrush)
@@ -574,7 +603,7 @@ class RadialView:
         hub_r = self._radii()[0]
         lift = 3 * s * g                  # the arrow nudges down as if inviting the drop
         draw_icon(painter, "save", QPointF(0, -hub_r * 0.6 + lift), 15 * s,
-                  _mix_color(pal.muted, pal.accent, g), 1.6 * s)
+                  _mix_color(pal.muted, self.neon(pal.accent), g), 1.6 * s)
 
     def _paint_page(self, painter: QPainter, page: int, pal, dark: bool, dpr: float) -> None:
         wedges = self.page_wedges(page)

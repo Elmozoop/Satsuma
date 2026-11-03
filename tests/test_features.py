@@ -214,3 +214,27 @@ def test_settings_watch_page_add_and_remove(qapp, tmp_path):
     finally:
         settings.set("watch_rules", [])
         window.close()
+
+
+def test_dragging_a_card_hands_over_the_file(qapp, workdir, monkeypatch):
+    """The drag itself must start (1.6 failed silently here: an error while making the drag image)."""
+    from PySide6.QtGui import QDrag
+
+    from satsuma.engine import images as image_engine
+    from satsuma.ui.toast import Toasts
+
+    out = image_engine.convert(workdir / "photo.jpg", ".webp")
+    toasts = Toasts()
+    toasts.started(1, "WEBP", "photo.jpg")
+    toasts.finished(1, [str(out)])
+    handed = {}
+
+    def fake_exec(drag, action=None):
+        handed["files"] = [Path(u.toLocalFile()) for u in drag.mimeData().urls()]
+        handed["image"] = not drag.pixmap().isNull()
+        return action
+
+    monkeypatch.setattr(QDrag, "exec", fake_exec)
+    toasts._start_drag(toasts._card(1))
+    assert handed == {"files": [out], "image": True}
+    toasts.hide()
