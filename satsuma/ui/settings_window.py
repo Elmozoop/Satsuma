@@ -142,10 +142,11 @@ class _Card(QFrame):
         text.setSpacing(1)
         text.addWidget(_label(title, "rowTitle"))
         row.hint = _label(hint, "rowHint", wrap=True)
-        row.hint.setVisible(bool(hint))
         text.addWidget(row.hint)
         row.text = text
         layout.addLayout(text, 1)
+        # Only after it sits inside the row: showing a parentless label opens it as its own window.
+        row.hint.setVisible(bool(hint))
         if control is not None:
             layout.addWidget(control, 0, Qt.AlignVCenter | Qt.AlignRight)
         row.setMinimumHeight(54)
