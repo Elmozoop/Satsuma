@@ -45,6 +45,7 @@ class Action:
     prompt: str | None = None  # "resize" | "trim" | "pages"
     skip_ext: tuple[str, ...] = field(default_factory=tuple)  # hide if every source has one of these
     icon: str | None = None    # name from ui/icons.py; None = big text label
+    hidden_by_default: bool = False  # rarely needed: off until ticked in Settings
 
 
 def _each(fn) -> Callable[[list[Path], dict, Progress], list[Path]]:
@@ -87,12 +88,14 @@ def _image_actions() -> list[Action]:
     convert = [
         (".png", "PNG", "lossless"), (".jpg", "JPG", "photo"), (".webp", "WEBP", "small"),
         (".gif", "GIF", "palette"), (".tiff", "TIFF", "print"), (".ico", "ICO", "icon"),
+        (".avif", "AVIF", "tiny, modern"), (".heic", "HEIC", "iPhone photo"), (".bmp", "BMP", "bitmap"),
     ]
-    skips = {".jpg": (".jpg", ".jpeg", ".jpe", ".jfif"), ".tiff": (".tif", ".tiff")}
+    skips = {".jpg": (".jpg", ".jpeg", ".jpe", ".jfif"), ".tiff": (".tif", ".tiff"),
+             ".heic": (".heic", ".heif")}
     actions = [
         Action(f"img-{ext[1:]}", label, caption, "convert",
                _each(lambda p, _params, e=ext: images.convert(p, e)),
-               skip_ext=skips.get(ext, (ext,)))
+               skip_ext=skips.get(ext, (ext,)), hidden_by_default=ext == ".bmp")
         for ext, label, caption in convert
     ]
     actions += [
@@ -120,7 +123,7 @@ def _video_actions() -> list[Action]:
                _each(lambda p, _params, e=ext: media.convert_video(p, e)),
                needs_ffmpeg=True, skip_ext=(ext,))
         for ext, caption in ((".mp4", "H.264"), (".mov", "QuickTime"), (".mkv", "Matroska"),
-                             (".webm", "VP9"))
+                             (".webm", "VP9"), (".avi", "older players"))
     ]
     actions += [
         Action("vid-gif", "GIF", "first 15 s", "convert",
@@ -149,7 +152,8 @@ def _audio_actions() -> list[Action]:
                _each(lambda p, _params, e=ext: media.convert_audio(p, e)),
                needs_ffmpeg=True, skip_ext=(ext,))
         for ext, caption in ((".mp3", "universal"), (".m4a", "AAC"), (".wav", "uncompressed"),
-                             (".flac", "lossless"), (".ogg", "Vorbis"), (".opus", "tiny"))
+                             (".flac", "lossless"), (".ogg", "Vorbis"), (".opus", "tiny"),
+                             (".aiff", "Mac, uncompressed"))
     ]
     actions += [
         Action("aud-trim", "Trim", "start → end", "tools",
@@ -185,9 +189,11 @@ def _pdf_actions() -> list[Action]:
 
 
 # ----------------------------------------------------------------------------- documents
-DOC_CAPTIONS = {".pdf": "document", ".docx": "Word", ".odt": "OpenDocument", ".rtf": "rich text",
-                ".txt": "plain text", ".html": "web page", ".pptx": "PowerPoint",
-                ".odp": "OpenDocument", ".xlsx": "Excel", ".ods": "OpenDocument", ".csv": "values"}
+DOC_CAPTIONS = {".pdf": "document", ".docx": "Word", ".doc": "Word 97–2003", ".odt": "OpenDocument",
+                ".rtf": "rich text", ".txt": "plain text", ".html": "web page", ".md": "Markdown",
+                ".pptx": "PowerPoint", ".ppt": "PowerPoint 97–2003", ".odp": "OpenDocument",
+                ".xlsx": "Excel", ".xls": "Excel 97–2003", ".ods": "OpenDocument", ".csv": "values",
+                ".json": "data"}
 
 
 def _doc_action(ext: str) -> Action:
@@ -207,7 +213,7 @@ def _document_actions(paths: list[Path]) -> list[Action]:
 # ----------------------------------------------------------------------------- shared
 ZIP = Action("any-zip", "ZIP", "compress to zip", "tools",
              _all(lambda ps, _params: archives.zip_files(ps)), icon="zip")
-EXTRACT = Action("zip-extract", "Extract", "unzip here", "tools",
+EXTRACT = Action("zip-extract", "Extract", "unpack here", "tools",
                  _each(lambda p, _params: archives.extract(p)), icon="extract")
 MIXED_PDF = Action("mix-pdf", "PDF", "merge all", "convert",
                    _all(lambda ps, _params: pdfs.merge(ps) if len(ps) > 1 else images.to_pdf(ps)), icon="merge")
@@ -227,7 +233,7 @@ def actions_for(paths, customise: bool = True) -> list[Action]:
     elif category == ft.DOCUMENT:
         candidates = _document_actions(paths)
     elif category == ft.ARCHIVE:
-        candidates = [EXTRACT] if all(p.suffix.lower() == ".zip" for p in paths) else []
+        candidates = [EXTRACT] if all(archives.can_extract(p) for p in paths) else []
     elif category == ft.MIXED and {ft.category_of(p) for p in paths} <= {ft.IMAGE, ft.PDF}:
         candidates = [MIXED_PDF]
     else:
@@ -242,28 +248,37 @@ def actions_for(paths, customise: bool = True) -> list[Action]:
         if len(paths) >= action.min_files
         and not (action.skip_ext and extensions <= set(action.skip_ext))
     ]
-    if category != ft.ARCHIVE or not all(p.suffix.lower() == ".zip" for p in paths):
+    if category != ft.ARCHIVE or not all(p.suffix.lower() == ".zip" for p in paths):   # no zip of a zip
         visible.append(ZIP)
     return customised(category, visible) if customise else visible
 
 
 # ----------------------------------------------------------------------------- customisation
-def customised(category: str, actions: list[Action]) -> list[Action]:
-    """Apply the user's hidden list and ordering for this file category."""
+def is_shown(category: str, action: Action) -> bool:
+    """The user's choice for this action, or its default when they haven't made one."""
     from .config import settings
 
-    hidden = set(settings.get("actions_hidden") or [])
+    key = f"{category}:{action.id}"
+    if key in (settings.get("actions_hidden") or []):
+        return False
+    return not action.hidden_by_default or key in (settings.get("actions_shown") or [])
+
+
+def customised(category: str, actions: list[Action]) -> list[Action]:
+    """Apply the user's shown/hidden choices and ordering for this file category."""
+    from .config import settings
+
     order = (settings.get("actions_order") or {}).get(category) or []
     rank = {action_id: index for index, action_id in enumerate(order)}
-    shown = [a for a in actions if f"{category}:{a.id}" not in hidden]
+    shown = [a for a in actions if is_shown(category, a)]
     # Stable sort: known ids by the user's order, new ones keep their default place after.
     return sorted(shown, key=lambda a: (0, rank[a.id]) if a.id in rank else (1, actions.index(a)))
 
 
 def catalogue() -> list[tuple[str, str, list[Action]]]:
     """Every action Satsuma can offer, per file category, in default order (for Settings)."""
-    docs = [_doc_action(e) for e in (".pdf", ".docx", ".odt", ".rtf", ".txt", ".html",
-                                     ".pptx", ".odp", ".xlsx", ".ods", ".csv")]
+    docs = [_doc_action(e) for e in (".pdf", ".docx", ".doc", ".odt", ".rtf", ".txt", ".html", ".md",
+                                     ".pptx", ".ppt", ".odp", ".xlsx", ".xls", ".ods", ".csv", ".json")]
     return [
         (ft.IMAGE, "Images", _image_actions() + [ZIP]),
         (ft.VIDEO, "Videos", _video_actions() + [ZIP]),

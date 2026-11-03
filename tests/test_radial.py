@@ -42,7 +42,10 @@ def test_rings_split_by_group_and_limit(qapp, image):
     settings._data["wedges_per_ring"] = 4
     view = RadialView()
     view.set_paths([image], animate=False)
-    assert [p.title for p in view.pages] == ["Convert 1", "Convert 2", "Tools 1", "Tools 2"]
+    titles = [p.title for p in view.pages]
+    assert titles[0] == "Convert 1" and titles[-1] == "Tools 2"
+    kinds = [t.split()[0] for t in titles]
+    assert kinds == sorted(kinds)   # every Convert ring comes before the Tools rings
     assert all(len(p.actions) <= 4 for p in view.pages)
     settings._data["start_page"] = "tools"
     view.set_paths([image], animate=False)

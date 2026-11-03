@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QButtonGroup, QColorDialog, QC
                                QWidget)
 
 from .. import winutil
-from ..actions import catalogue
+from ..actions import catalogue, is_shown
 from ..config import BIN_DIR, DATA_DIR, DEFAULTS, LOG_FILE, VERSION, settings
 from ..engine import documents
 from ..engine import ffmpeg_tool as ff
@@ -523,7 +523,6 @@ class SettingsWindow(QDialog):
 
     def _load_action_list(self) -> None:
         category, actions = self._current_actions()
-        hidden = set(settings.get("actions_hidden") or [])
         order = (settings.get("actions_order") or {}).get(category) or []
         rank = {a: i for i, a in enumerate(order)}
         ordered = sorted(actions, key=lambda a: (0, rank[a.id]) if a.id in rank else (1, actions.index(a)))
@@ -537,7 +536,7 @@ class SettingsWindow(QDialog):
             item.setData(Qt.UserRole + 1, (action.label, action.caption, ring))
             item.setFlags(item.flags() | Qt.ItemIsUserCheckable | Qt.ItemIsDragEnabled)
             item.setFlags(item.flags() & ~Qt.ItemIsDropEnabled)
-            item.setCheckState(Qt.Unchecked if f"{category}:{action.id}" in hidden else Qt.Checked)
+            item.setCheckState(Qt.Checked if is_shown(category, action) else Qt.Unchecked)
             # Every row gets an icon (blank for format wedges) so rows line up.
             pixmap = QPixmap(36, 36)
             pixmap.setDevicePixelRatio(2.0)
@@ -562,15 +561,21 @@ class SettingsWindow(QDialog):
             self.actions_preview_note.setText("No preview for a mix of file types.")
 
     def _save_action_list(self) -> None:
-        category, _actions = self._current_actions()
+        category, actions = self._current_actions()
+        by_id = {a.id: a for a in actions}
         ids = [self.action_list.item(i).data(Qt.UserRole) for i in range(self.action_list.count())]
-        unchecked = {self.action_list.item(i).data(Qt.UserRole) for i in range(self.action_list.count())
-                     if self.action_list.item(i).checkState() != Qt.Checked}
-        hidden = [h for h in (settings.get("actions_hidden") or []) if not h.startswith(f"{category}:")]
-        hidden += [f"{category}:{a}" for a in ids if a in unchecked]
+        checked = {self.action_list.item(i).data(Qt.UserRole) for i in range(self.action_list.count())
+                   if self.action_list.item(i).checkState() == Qt.Checked}
+        mine = f"{category}:"
+        hidden = [h for h in (settings.get("actions_hidden") or []) if not h.startswith(mine)]
+        shown = [h for h in (settings.get("actions_shown") or []) if not h.startswith(mine)]
+        # Store only choices that differ from each action's default.
+        hidden += [mine + a for a in ids if a not in checked and not by_id[a].hidden_by_default]
+        shown += [mine + a for a in ids if a in checked and by_id[a].hidden_by_default]
         order = dict(settings.get("actions_order") or {})
         order[category] = ids
         settings.set("actions_order", order)
+        settings.set("actions_shown", shown)
         settings.set("actions_hidden", hidden)
 
     def _check_all(self, checked: bool) -> None:
@@ -593,11 +598,11 @@ class SettingsWindow(QDialog):
 
     def _reset_action_list(self) -> None:
         category, _ = self._current_actions()
-        hidden = [h for h in (settings.get("actions_hidden") or []) if not h.startswith(f"{category}:")]
+        for key in ("actions_hidden", "actions_shown"):
+            settings.set(key, [h for h in (settings.get(key) or []) if not h.startswith(f"{category}:")])
         order = dict(settings.get("actions_order") or {})
         order.pop(category, None)
         settings.set("actions_order", order)
-        settings.set("actions_hidden", hidden)
         self._load_action_list()
 
     # ================================================================== Trigger

@@ -18,9 +18,9 @@ AUDIO_EXT = {
 PDF_EXT = {".pdf"}
 DOC_EXT = {
     ".doc", ".docx", ".odt", ".rtf", ".txt", ".md", ".markdown", ".html", ".htm",
-    ".ppt", ".pptx", ".odp", ".xls", ".xlsx", ".ods", ".csv", ".epub",
+    ".ppt", ".pptx", ".odp", ".xls", ".xlsx", ".ods", ".csv", ".epub", ".json",
 }
-ARCHIVE_EXT = {".zip", ".7z", ".rar", ".tar", ".gz", ".bz2", ".xz"}
+ARCHIVE_EXT = {".zip", ".7z", ".rar", ".tar", ".tgz", ".gz", ".bz2", ".xz"}
 
 IMAGE = "image"
 VIDEO = "video"

@@ -1,13 +1,16 @@
 """Document conversion.
 
 Strategy, in order:
-  * .txt / .md / .html  -> PDF with Qt's own renderer (no extra software).
+  * .txt / .md / .html  -> PDF, and Markdown <-> HTML <-> text, with Qt (no extra software).
+  * .csv <-> .json      -> plain Python.
   * Office formats       -> LibreOffice if installed, otherwise Microsoft Office
                             through COM (Word / PowerPoint / Excel), driven by a
                             short PowerShell script so no pywin32 is needed.
 """
 from __future__ import annotations
 
+import csv
+import json
 import os
 import shutil
 import subprocess
@@ -110,31 +113,39 @@ def _libreoffice_convert(source: Path, extension: str) -> Path:
 
 # --------------------------------------------------------------------------- Microsoft Office
 _PS_SCRIPT = r"""
-param([string]$Kind, [string]$Src, [string]$Dst)
+param([string]$Kind, [string]$Src, [string]$Dst, [string]$Fmt)
 $ErrorActionPreference = 'Stop'
 $app = $null
+$m = [Type]::Missing
+# A dummy password makes protected files fail at once instead of waiting on a hidden prompt.
+$probe = 'satsuma-not-a-password'
 try {
   switch ($Kind) {
     'word' {
       $app = New-Object -ComObject Word.Application
       $app.Visible = $false
       $app.DisplayAlerts = 0
-      $doc = $app.Documents.Open($Src, $false, $true)   # ConfirmConversions, ReadOnly
-      $doc.ExportAsFixedFormat($Dst, 17)                # wdExportFormatPDF
+      # Word guesses short HTML files are plain text unless told (wdOpenFormatWebPages = 7).
+      $open = if ($Src -match '\.html?$') { 7 } else { 0 }
+      $doc = $app.Documents.Open($Src, $false, $true, $false, $probe, $m, $m, $m, $m, $open)   # ..., Password, ..., Format
+      if ($Fmt -eq 'pdf') { $doc.ExportAsFixedFormat($Dst, 17) }        # wdExportFormatPDF
+      elseif ($Fmt -eq 'utf8') { $doc.SaveAs2($Dst, 2, $m, $m, $false, $m, $m, $m, $m, $m, $m, 65001) }   # plain text, UTF-8
+      else { $doc.SaveAs2($Dst, [int]$Fmt, $m, $m, $false) }
       $doc.Close(0)
     }
     'slides' {
       $app = New-Object -ComObject PowerPoint.Application
       $pres = $app.Presentations.Open($Src, -1, 0, 0)    # ReadOnly, Untitled, WithWindow=false
-      $pres.SaveAs($Dst, 32)                             # ppSaveAsPDF
+      $pres.SaveAs($Dst, [int]$Fmt)
       $pres.Close()
     }
     'sheets' {
       $app = New-Object -ComObject Excel.Application
       $app.Visible = $false
       $app.DisplayAlerts = $false
-      $book = $app.Workbooks.Open($Src, 0, $true)       # UpdateLinks, ReadOnly
-      $book.ExportAsFixedFormat(0, $Dst)                 # xlTypePDF
+      $book = $app.Workbooks.Open($Src, 0, $true, $m, $probe)   # UpdateLinks, ReadOnly, Format, Password
+      if ($Fmt -eq 'pdf') { $book.ExportAsFixedFormat(0, $Dst) }   # xlTypePDF
+      else { $book.SaveAs($Dst, [int]$Fmt) }
       $book.Close($false)
     }
   }
@@ -145,6 +156,14 @@ try {
   }
 }
 """
+
+# File-format codes for SaveAs in each Office app ("pdf"/"utf8" are handled specially above).
+OFFICE_TARGETS = {
+    "word": {".pdf": "pdf", ".docx": "16", ".doc": "0", ".rtf": "6", ".odt": "23", ".txt": "utf8",
+             ".html": "10"},
+    "sheets": {".pdf": "pdf", ".xlsx": "51", ".xls": "56", ".csv": "62", ".ods": "60"},
+    "slides": {".pdf": "32", ".pptx": "24", ".ppt": "1", ".odp": "35"},
+}
 
 
 def office_available(kind: str) -> bool:
@@ -163,8 +182,9 @@ def office_available(kind: str) -> bool:
         return False
 
 
-def _office_to_pdf(source: Path, kind: str) -> Path:
-    destination = target_path(source, ".pdf")
+def _office_convert(source: Path, kind: str, extension: str) -> Path:
+    fmt = OFFICE_TARGETS[kind][extension]
+    destination = target_path(source, extension)
     work = Path(tempfile.mkdtemp(prefix="satsuma-ms-"))
     script = work / "convert.ps1"
     script.write_text(_PS_SCRIPT, encoding="utf-8-sig")
@@ -172,12 +192,15 @@ def _office_to_pdf(source: Path, kind: str) -> Path:
         completed = subprocess.run(
             ["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
              "-File", str(script), "-Kind", kind,
-             "-Src", str(source.resolve()), "-Dst", str(destination.resolve())],
+             "-Src", str(source.resolve()), "-Dst", str(destination.resolve()), "-Fmt", fmt],
             capture_output=True, stdin=subprocess.DEVNULL, encoding="utf-8", errors="replace", timeout=600, creationflags=NO_WINDOW,
         )
         if completed.returncode != 0 or not destination.exists():
-            detail = (completed.stderr or completed.stdout or "").strip().splitlines()
-            raise ConversionError(detail[0] if detail else "Microsoft Office could not convert this file.")
+            detail = (completed.stderr or completed.stdout or "").strip()
+            if "password" in detail.lower():
+                raise ConversionError("This file is password protected. Open it, remove the password, and try again.")
+            lines = detail.splitlines()
+            raise ConversionError(lines[0] if lines else "Microsoft Office could not convert this file.")
         return destination
     except subprocess.TimeoutExpired as exc:
         raise ConversionError("Microsoft Office timed out.") from exc
@@ -230,6 +253,74 @@ def _text_to_pdf(source: Path) -> Path:
     return _on_gui_thread(lambda: _render_text_pdf(source))
 
 
+def _read_text(source: Path) -> str:
+    raw = source.read_bytes()
+    for encoding in ("utf-8-sig", "utf-16", "cp1252", "latin-1"):
+        try:
+            return raw.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    return raw.decode("utf-8", errors="replace")
+
+
+def _render_text(source: Path, extension: str) -> Path:
+    """Markdown / HTML to HTML, Markdown or plain text with Qt's text engine (GUI thread)."""
+    from PySide6.QtGui import QTextDocument
+
+    text = _read_text(source)
+    document = QTextDocument()
+    if source.suffix.lower() in (".md", ".markdown"):
+        document.setMarkdown(text)
+    else:
+        document.setHtml(text)
+    if extension == ".html":
+        result = document.toHtml()
+    elif extension == ".md":
+        result = document.toMarkdown()
+    else:
+        result = document.toPlainText()
+    destination = target_path(source, extension)
+    destination.write_text(result, encoding="utf-8")
+    return destination
+
+
+# --------------------------------------------------------------------------- data
+def _csv_to_json(source: Path) -> Path:
+    text = _read_text(source)
+    try:
+        dialect = csv.Sniffer().sniff(text[:4096], delimiters=",;	|")
+    except csv.Error:
+        dialect = csv.excel
+    rows = list(csv.DictReader(text.splitlines(), dialect=dialect))
+    destination = target_path(source, ".json")
+    destination.write_text(json.dumps(rows, indent=2, ensure_ascii=False), encoding="utf-8")
+    return destination
+
+
+def _json_to_csv(source: Path) -> Path:
+    try:
+        data = json.loads(_read_text(source))
+    except ValueError as exc:
+        raise ConversionError(f"This isn't valid JSON ({exc}).") from exc
+    if isinstance(data, dict):
+        # {"items": [...]} is common; a single object becomes one row.
+        lists = [v for v in data.values() if isinstance(v, list)]
+        data = lists[0] if len(lists) == 1 else [data]
+    if not isinstance(data, list) or not all(isinstance(row, dict) for row in data):
+        raise ConversionError("Only a list of objects (rows with named fields) can become a CSV.")
+    columns: list[str] = []
+    for row in data:
+        columns += [key for key in row if key not in columns]
+    destination = target_path(source, ".csv")
+    with open(destination, "w", newline="", encoding="utf-8-sig") as handle:   # BOM: Excel reads UTF-8
+        writer = csv.DictWriter(handle, fieldnames=columns)
+        writer.writeheader()
+        for row in data:
+            writer.writerow({k: json.dumps(v, ensure_ascii=False) if isinstance(v, (dict, list)) else v
+                             for k, v in row.items()})
+    return destination
+
+
 def _render_text_pdf(source: Path) -> Path:
     from PySide6.QtCore import QMarginsF, QSizeF
     from PySide6.QtGui import QFont, QFontDatabase, QPageLayout, QPageSize, QPdfWriter, QTextDocument
@@ -238,16 +329,7 @@ def _render_text_pdf(source: Path) -> Path:
         # Qt would quietly write pages with no text on them.
         raise ConversionError("No fonts are available to lay out the text.")
 
-    raw = source.read_bytes()
-    text = None
-    for encoding in ("utf-8-sig", "utf-16", "cp1252", "latin-1"):
-        try:
-            text = raw.decode(encoding)
-            break
-        except UnicodeDecodeError:
-            continue
-    text = text or raw.decode("utf-8", errors="replace")
-
+    text = _read_text(source)
     destination = target_path(source, ".pdf")
     writer = QPdfWriter(str(destination))
     writer.setResolution(300)
@@ -279,37 +361,66 @@ def _render_text_pdf(source: Path) -> Path:
 
 
 # --------------------------------------------------------------------------- public API
+# What Qt converts by itself, with no Office or LibreOffice.
+QT_TEXT = {
+    ".txt": [".pdf"],
+    ".md": [".pdf", ".html", ".txt"], ".markdown": [".pdf", ".html", ".txt"],
+    ".html": [".pdf", ".md", ".txt"], ".htm": [".pdf", ".md", ".txt"],
+}
+
+
+def _office_kind(src_ext: str, extension: str) -> str | None:
+    """Which Office app can turn `src_ext` into `extension`, if it is installed."""
+    if src_ext == ".csv":
+        kind = "sheets"
+    elif src_ext in (".html", ".htm") and extension == ".docx":
+        kind = "word"
+    else:
+        kind = family(src_ext)
+    if kind is None or src_ext == ".epub" or extension not in OFFICE_TARGETS[kind]:
+        return None
+    return kind if office_available(kind) else None
+
+
 def can_convert(extension: str) -> list[str]:
     """Target extensions available for a source on this machine."""
     extension = extension.lower()
-    if extension in TEXTISH and extension != ".csv":
-        targets = [".pdf"]
-        if libreoffice_path() and extension in (".txt", ".html", ".htm"):
+    if extension == ".json":
+        return [".csv"]
+    lo = libreoffice_path()
+    if extension in QT_TEXT:
+        targets = list(QT_TEXT[extension])
+        if (lo and extension in (".txt", ".html", ".htm")) or _office_kind(extension, ".docx"):
             targets.append(".docx")
         return targets
-    kind = family(extension)
-    if kind is None and extension == ".csv":
-        kind = "sheets"
+    targets = [".json"] if extension == ".csv" else []
+    kind = "sheets" if extension == ".csv" else family(extension)
     if kind is None:
-        return []
-    if libreoffice_path():
-        return [t for t in LO_TARGETS[kind] if t != extension]
-    if extension != ".csv" and office_available(kind):
-        return [".pdf"]
-    return []
+        return targets
+    if lo:
+        more = LO_TARGETS[kind]
+    else:
+        more = [t for t in OFFICE_TARGETS[kind] if _office_kind(extension, t)]
+    return targets + [t for t in more if t != extension and t not in targets]
 
 
 def convert(source, extension: str) -> Path:
     source = Path(source)
     extension = extension.lower()
     src_ext = source.suffix.lower()
-    if extension == ".pdf" and src_ext in (".txt", ".md", ".markdown", ".html", ".htm"):
-        return _text_to_pdf(source)
+    if src_ext == ".json" and extension == ".csv":
+        return _json_to_csv(source)
+    if src_ext == ".csv" and extension == ".json":
+        return _csv_to_json(source)
+    if extension in QT_TEXT.get(src_ext, []):
+        if extension == ".pdf":
+            return _text_to_pdf(source)
+        return _on_gui_thread(lambda: _render_text(source, extension))
     if libreoffice_path():
         return _libreoffice_convert(source, extension)
-    kind = family(src_ext)
-    if extension == ".pdf" and kind and office_available(kind):
-        return _office_to_pdf(source, kind)
+    kind = _office_kind(src_ext, extension)
+    if kind:
+        return _office_convert(source, kind, extension)
     raise ConversionError(
         "Converting this document needs LibreOffice (free) or Microsoft Office. "
         "Install either one and try again."

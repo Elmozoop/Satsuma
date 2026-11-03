@@ -8,7 +8,7 @@ from pathlib import Path
 
 APP_NAME = "Satsuma"
 APP_ID = "satsuma.win"
-VERSION = "1.4.0"
+VERSION = "1.5.0"
 
 
 def _base_dir() -> Path:
@@ -73,6 +73,7 @@ DEFAULTS = {
     "start_page": "convert",   # convert | tools
     # ---- actions
     "actions_hidden": [],      # action ids the user switched off
+    "actions_shown": [],       # hidden-by-default action ids the user switched on
     "actions_order": {},       # file category -> ordered action ids
 }
 
@@ -137,8 +138,9 @@ class Settings:
         if not (len(accent) == 7 and accent.startswith("#")
                 and all(c in "0123456789abcdefABCDEF" for c in accent[1:])):
             self._data["accent"] = DEFAULTS["accent"]
-        if not isinstance(self._data.get("actions_hidden"), list):
-            self._data["actions_hidden"] = []
+        for key in ("actions_hidden", "actions_shown"):
+            if not isinstance(self._data.get(key), list):
+                self._data[key] = []
         if not isinstance(self._data.get("actions_order"), dict):
             self._data["actions_order"] = {}
         try:

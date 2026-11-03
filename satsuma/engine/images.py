@@ -8,7 +8,7 @@ from PIL import Image, ImageOps
 from ..config import settings
 from .paths import target_path
 
-try:  # optional: adds HEIC/HEIF reading
+try:  # optional: adds HEIC/HEIF reading and writing
     import pillow_heif
 
     pillow_heif.register_heif_opener()
@@ -20,11 +20,11 @@ except Exception:  # pragma: no cover - optional dependency
 PIL_FORMAT = {
     ".png": "PNG", ".jpg": "JPEG", ".jpeg": "JPEG", ".webp": "WEBP",
     ".bmp": "BMP", ".tif": "TIFF", ".tiff": "TIFF", ".gif": "GIF",
-    ".ico": "ICO", ".pdf": "PDF",
+    ".ico": "ICO", ".pdf": "PDF", ".avif": "AVIF", ".heic": "HEIF", ".heif": "HEIF",
 }
 # Formats with no alpha channel: flatten onto white first.
 NO_ALPHA = {"JPEG", "PDF", "BMP"}
-LOSSY = {"JPEG", "WEBP"}
+LOSSY = {"JPEG", "WEBP", "AVIF", "HEIF"}
 ICO_SIZES = [(16, 16), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)]
 
 MAX_PIXELS = 400_000_000  # guard against decompression bombs
@@ -57,7 +57,7 @@ def _prepare(image: Image.Image, pil_format: str) -> Image.Image:
         return image
     if pil_format == "PNG" and image.mode not in ("RGB", "RGBA", "L", "LA", "P", "I", "1"):
         return image.convert("RGBA")
-    if pil_format == "WEBP" and image.mode not in ("RGB", "RGBA"):
+    if pil_format in ("WEBP", "AVIF", "HEIF") and image.mode not in ("RGB", "RGBA"):
         return image.convert("RGBA" if "A" in image.getbands() else "RGB")
     if pil_format == "ICO":
         image = image.convert("RGBA") if image.mode != "RGBA" else image
@@ -79,6 +79,8 @@ def _save(image: Image.Image, destination: Path, pil_format: str, quality: int |
                        progressive=True, subsampling="4:2:0")
     elif pil_format == "WEBP":
         options.update(quality=quality or settings.get("jpeg_quality"), method=5)
+    elif pil_format in ("AVIF", "HEIF"):
+        options.update(quality=quality or settings.get("jpeg_quality"))
     elif pil_format == "PNG":
         options.update(optimize=True, compress_level=9)
     elif pil_format == "TIFF":
@@ -98,6 +100,8 @@ def convert(source, extension: str, quality: int | None = None) -> Path:
     pil_format = PIL_FORMAT.get(extension)
     if not pil_format:
         raise ValueError(f"Unsupported image format: {extension}")
+    if pil_format == "HEIF" and not HEIF_OK:
+        raise ValueError("HEIC needs the pillow-heif package (pip install pillow-heif).")
     with _load(source) as image:
         prepared = _prepare(image, pil_format)
         destination = target_path(source, extension)

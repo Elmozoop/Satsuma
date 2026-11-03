@@ -23,6 +23,7 @@ AUDIO_PROFILES = {
     ".m4a":  ["-c:a", "aac", "-b:a", "192k"],
     ".aac":  ["-c:a", "aac", "-b:a", "192k"],
     ".wav":  ["-c:a", "pcm_s16le"],
+    ".aiff": ["-c:a", "pcm_s16be"],
     ".flac": ["-c:a", "flac"],
     ".ogg":  ["-c:a", "libvorbis", "-q:a", "5"],
     ".opus": ["-c:a", "libopus", "-b:a", "128k"],
