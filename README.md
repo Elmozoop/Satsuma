@@ -27,7 +27,7 @@ Prefer a standalone `.exe`? See [Build an .exe](#build-an-exe).
 | Do this | What happens |
 |---|---|
 | Drag any file, and hold **Shift** while dragging | The ring springs open under your cursor, with a preview of the file in the centre |
-| Move over a wedge | It lights up; the centre names the action |
+| Move over a wedge and rest a moment | It lights up, and an info panel beside it says what it will do and where the new file goes |
 | Rest on the **centre** for a moment | The ring swaps between **Convert** and **Tools** (dots show which) — also right after the ring opens under your pointer |
 | Drop the file on a wedge | A tick confirms it; the job runs in the background with a card in the corner |
 | Let go anywhere else, or press **Esc** | Nothing happens |
@@ -103,7 +103,8 @@ Right-click the tray icon → **Settings…** It follows your theme and accent c
 
 - **Appearance** — with a live preview you can hover and click: theme (Windows / light / dark),
   accent colour, how see-through the ring is, size, wedges per ring, which ring opens first,
-  animation speed and bounce, what the centre shows, icons, and a colour for the Convert ring by file type.
+  animation speed and bounce, what the centre shows, icons, a colour for the Convert ring by file type,
+  and the info panel beside wedges.
 - **Ring actions** — for each kind of file, **click a wedge in the preview** to swap in another
   conversion or take it off the ring; or tick and drag in the list beside it.
 - **Trigger** — the key to hold (Shift / Ctrl / Alt), *only for real file drags*, start with

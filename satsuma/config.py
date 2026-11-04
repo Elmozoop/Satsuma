@@ -8,7 +8,7 @@ from pathlib import Path
 
 APP_NAME = "Satsuma"
 APP_ID = "satsuma.win"
-VERSION = "1.11.1"
+VERSION = "1.11.2"
 
 
 def _base_dir() -> Path:
@@ -68,6 +68,7 @@ DEFAULTS = {
     "show_icons": True,
     "type_colors": True,       # tint convert wedges by the kind of file they make
     "show_captions": True,     # describe the hovered action in the centre
+    "explain_actions": True,   # a panel beside the hovered wedge says what it will do
     "hub_info": "size",        # size | name | type
     "wedges_per_ring": 8,      # 3 .. 10; more actions spill onto another ring
     "hub_switch_ms": 450,      # rest on the centre this long to swap rings

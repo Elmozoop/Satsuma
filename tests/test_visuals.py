@@ -229,3 +229,59 @@ def test_clicking_a_wedge_in_the_preview_asks_what_to_put_there(actions_page, mo
     assert any(t.startswith("BMP") for t in shown["items"])                 # off-ring options are offered
     assert not any(t.startswith("Compress") for t in shown["items"])         # tools don't go on the Convert ring
     assert shown["held"] is wedge and actions_page.actions_preview.held is None
+
+
+# ----------------------------------------------------------------------------- explanation bubble
+def test_every_action_has_a_plain_description():
+    from satsuma.actions import catalogue
+    from satsuma.explain import description, explain
+
+    for _category, _label, group in catalogue():
+        for action in group:
+            text = description(action)
+            assert len(text) > 15 and text.endswith("."), action.id
+    title, _body, footer = explain(next(a for _c, _l, g in catalogue() for a in g if a.id == "img-webp"))
+    assert title == "WEBP · small" and "next to the original" in footer and "isn't changed" in footer
+    settings.set("output_mode", "subfolder")
+    try:
+        assert "“Converted” folder" in explain(catalogue()[0][2][0])[2]
+    finally:
+        settings.set("output_mode", "source")
+
+
+def test_bubble_appears_beside_the_hovered_wedge_and_follows(qapp, workdir):
+    from satsuma.ui.menu import ActionMenu
+
+    menu = ActionMenu()
+    # The drop window with a file dragged over it: unlike click mode it doesn't close when another
+    # test's window takes focus, so the bubble's short delay can't race a self-dismiss.
+    menu.open_pinned()
+    menu.paths = [workdir / "photo.jpg"]
+    menu.view.set_paths(menu.paths, animate=False)
+    pump(qapp, 400)
+    first, second = menu.view.page_wedges()[2], menu.view.page_wedges()[6]
+    menu._set_hover(first)
+    assert not menu.bubble.isVisible()                              # waits a moment first
+    assert _wait(qapp, menu.bubble.isVisible)
+    assert menu.bubble.title.startswith(first.action.label)
+    assert menu.bubble.geometry().left() > menu.geometry().center().x()   # right-hand wedge: bubble on the right
+    menu._set_hover(second)
+    assert menu.bubble.title.startswith(second.action.label)        # follows at once
+    menu._set_hover(None)
+    assert not menu.bubble.isVisible()
+    settings.set("explain_actions", False)
+    try:
+        menu._set_hover(first)
+        pump(qapp, 500)
+        assert not menu.bubble.isVisible()
+    finally:
+        settings.set("explain_actions", True)
+    menu.dismiss(animate=False)
+
+
+
+def test_rename_panel_doesnt_promise_the_original_is_unchanged():
+    from satsuma.actions import RENAME
+    from satsuma.explain import explain
+
+    assert "old names back" in explain(RENAME)[2] and "isn't changed" not in explain(RENAME)[2]
