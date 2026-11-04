@@ -261,6 +261,28 @@ def _icon_path(name: str) -> QPainterPath:
         p.moveTo(12, 11)
         p.lineTo(12, 17)
         p.addEllipse(QRectF(11.2, 7, 1.6, 1.6))
+    elif name == "volume":         # a speaker with even waves
+        p.moveTo(3, 9.5)
+        p.lineTo(6.5, 9.5)
+        p.lineTo(11, 5.5)
+        p.lineTo(11, 18.5)
+        p.lineTo(6.5, 14.5)
+        p.lineTo(3, 14.5)
+        p.closeSubpath()
+        p.arcMoveTo(QRectF(10, 8, 6, 8), 60)
+        p.arcTo(QRectF(10, 8, 6, 8), 60, -120)
+        p.arcMoveTo(QRectF(10, 5, 11, 14), 55)
+        p.arcTo(QRectF(10, 5, 11, 14), 55, -110)
+    elif name == "rename":         # a name tag with a text cursor
+        p.addRoundedRect(QRectF(2.5, 7, 19, 10), 2.5, 2.5)
+        p.moveTo(6, 12)
+        p.lineTo(11, 12)
+        p.moveTo(15, 4.5)
+        p.lineTo(15, 19.5)
+        p.moveTo(13, 4.5)
+        p.lineTo(17, 4.5)
+        p.moveTo(13, 19.5)
+        p.lineTo(17, 19.5)
     elif name == "tick":
         p.moveTo(5, 12.5)
         p.lineTo(10, 17.5)
@@ -272,7 +294,7 @@ _CACHE: dict[str, QPainterPath] = {}
 NAMES = ("compress", "resize", "rotate", "flip", "trim", "mute", "frame", "join", "merge",
          "split", "pages", "zip", "extract", "text", "image", "music", "doc", "close",
          "clean", "bw", "square", "lock", "unlock", "numbers", "speed", "boomerang",
-         "palette", "ring", "pointer", "save", "folder", "gear", "info", "tick")
+         "palette", "ring", "pointer", "save", "folder", "gear", "info", "tick", "volume", "rename")
 
 
 def draw_icon(painter: QPainter, name: str, center: QPointF, size: float, color, width: float = 1.7) -> None:

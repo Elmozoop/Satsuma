@@ -181,7 +181,15 @@ class Toasts(QWidget):
         self.update()
 
     def _undo(self, card: Card) -> None:
-        if winutil.recycle(undo_targets(card.outputs)):
+        from ..engine import rename
+
+        if rename.can_undo(card.outputs):
+            if rename.undo(card.outputs):
+                card.state = "undone"
+                card.message = "Old names put back"
+            else:
+                card.message = "Couldn't put every old name back"
+        elif winutil.recycle(undo_targets(card.outputs)):
             card.state = "undone"
             card.message = "Moved to the Recycle Bin"
         else:

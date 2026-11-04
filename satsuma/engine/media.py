@@ -131,6 +131,31 @@ def convert_audio(source, extension: str) -> Path:
     return destination
 
 
+# EBU R128 loudness: speech and music at a steady, comfortable level, no clipping.
+LOUDNORM = "loudnorm=I=-16:TP=-1.5:LRA=11"
+
+
+def normalize_volume(source) -> Path:
+    """Even out the volume: quiet parts lifted, loud parts tamed. For a video only the sound is
+    re-encoded; the picture is copied untouched."""
+    source = Path(source)
+    extension = source.suffix.lower()
+    if extension in VIDEO_PROFILES or extension in (".m4v", ".wmv", ".flv", ".ts"):
+        if not ff.has_audio(source):
+            raise ValueError("This video has no sound to even out.")
+        extension = extension if extension in VIDEO_PROFILES else ".mp4"
+        audio = ["-c:a", "libopus", "-b:a", "128k"] if extension == ".webm" else ["-c:a", "aac", "-b:a", "192k"]
+        destination = target_path(source, extension, stem=f"{source.stem}-levelled")
+        ff.run(["-i", str(source), "-map", "0:v?", "-map", "0:a:0", "-c:v", "copy", "-af", LOUDNORM,
+                *audio, str(destination)])
+        return destination
+    extension = extension if extension in AUDIO_PROFILES else ".m4a"
+    destination = target_path(source, extension, stem=f"{source.stem}-levelled")
+    ff.run(["-i", str(source), "-vn", "-map", "0:a:0", "-af", LOUDNORM, *AUDIO_PROFILES[extension],
+            str(destination)])
+    return destination
+
+
 def to_gif(source, width: int = 480, fps: int = 12, max_seconds: float = 15.0) -> Path:
     """Two-pass palette GIF: far better colours than a naive conversion."""
     source = Path(source)

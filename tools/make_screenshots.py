@@ -3,7 +3,7 @@
     .venv\\Scripts\\python.exe tools\\make_screenshots.py
 
 Everything is drawn by Satsuma's own code with throwaway settings, so the pictures always match
-the app. Writes demo.gif, menu.png, cards.png, prompt.png, settings.png and watch.png.
+the app. Writes demo.webp, menu.png, cards.png, prompt.png, settings.png and watch.png.
 """
 from __future__ import annotations
 
@@ -32,7 +32,7 @@ from satsuma.ui.toast import Toasts  # noqa: E402
 
 DOCS = ROOT / "docs"
 WORK = Path(tempfile.mkdtemp(prefix="satsuma-shot-files-"))
-FPS = 25           # 40 ms a frame: GIF stores this exactly, so playback is even
+FPS = 30           # an animated WebP keeps every frame's timing and full colour: smooth playback
 
 
 def frames_for(seconds: float) -> int:
@@ -101,17 +101,17 @@ def draw_cursor(painter: QPainter, at: QPointF, carrying: Path | None) -> None:
     painter.drawPath(arrow)
 
 
-# ----------------------------------------------------------------------------- demo.gif
-def demo_gif(photo: Path) -> None:
-    width, height = 480, 360
-    settings.set("menu_scale", 0.78)
+# ----------------------------------------------------------------------------- demo.webp
+def demo_animation(photo: Path) -> None:
+    width, height = 640, 480
+    settings.set("menu_scale", 1.0)
     view = RadialView()
     view.set_paths([photo], animate=True)
-    centre = QPointF(width / 2 - 40, height / 2)
+    centre = QPointF(width / 2 - 50, height / 2 - 10)
     toasts = Toasts()
     out = images.convert(photo, ".webp")
     frames: list[QImage] = []
-    cursor = QPointF(40, 320)
+    cursor = QPointF(60, 430)
     dt = 1 / FPS
 
     def frame(carrying=True, card=False) -> None:
@@ -125,8 +125,8 @@ def demo_gif(photo: Path) -> None:
             shot = QImage(toasts.size(), QImage.Format_ARGB32_Premultiplied)
             shot.fill(Qt.transparent)
             toasts.render(shot)
-            painter.drawImage(QRectF(width - shot.width() * 0.8 - 4, height - shot.height() * 0.8 - 4,
-                                     shot.width() * 0.8, shot.height() * 0.8), shot)
+            painter.drawImage(QRectF(width - shot.width() - 4, height - shot.height() - 4,
+                                     shot.width(), shot.height()), shot)
         draw_cursor(painter, cursor, photo if carrying else None)
         painter.end()
         frames.append(image)
@@ -135,7 +135,7 @@ def demo_gif(photo: Path) -> None:
     steps = frames_for(0.8)
     for i in range(steps):
         t = ease((i + 1) / steps)
-        cursor = QPointF(40 + (centre.x() - 40) * t, 320 + (centre.y() - 320) * t)
+        cursor = QPointF(60 + (centre.x() - 60) * t, 430 + (centre.y() - 430) * t)
         frame()
     view.open(animate=True)
     for _ in range(frames_for(0.7)):
@@ -175,21 +175,28 @@ def demo_gif(photo: Path) -> None:
         view.tick(dt)
         frame(carrying=False, card=True)
 
-    # One palette for every frame keeps the GIF small and free of flicker.
-    pil = [Image.frombytes("RGBA", (f.width(), f.height()), bytes(f.convertToFormat(QImage.Format_RGBA8888).constBits()))
-           .convert("RGB") for f in frames]
-    reference = Image.new("RGB", (width, height * 3 + 24))
-    for i, index in enumerate((len(pil) // 3, len(pil) // 2, len(pil) - 1)):
-        reference.paste(pil[index], (0, height * i))
-    # Exact colours the eye notices if they drift: text white, the accent, the success green.
-    for i, colour in enumerate(((255, 255, 255), (242, 242, 244), (20, 20, 24), (255, 138, 31), (76, 201, 128))):
-        reference.paste(colour, (i * 96, height * 3, (i + 1) * 96, height * 3 + 24))
-    palette = reference.quantize(colors=256, method=Image.Quantize.MEDIANCUT)
-    gif = [f.quantize(palette=palette, dither=Image.Dither.NONE) for f in pil]
-    durations = [int(1000 / FPS)] * len(gif)
-    durations[-1] = 1600
-    gif[0].save(DOCS / "demo.gif", save_all=True, append_images=gif[1:], duration=durations, loop=0,
-                optimize=True)
+    def to_pil(frame_image: QImage) -> Image.Image:
+        rgba = frame_image.convertToFormat(QImage.Format_RGBA8888)   # keep it alive while copying its pixels
+        return Image.frombytes("RGBA", (rgba.width(), rgba.height()), bytes(rgba.constBits()),
+                               "raw", "RGBA", rgba.bytesPerLine()).convert("RGB")
+
+    # Merge identical neighbours ourselves, adding up their time: left to the encoder, merged frames
+    # lose their duration and the animation jumps.
+    pil: list[Image.Image] = []
+    durations: list[int] = []
+    previous = None
+    for f in frames:
+        image = to_pil(f)
+        data = image.tobytes()
+        if data == previous:
+            durations[-1] += round(1000 / FPS)
+            continue
+        pil.append(image)
+        durations.append(round(1000 / FPS))
+        previous = data
+    durations[-1] += 1600                      # rest on the finished card before looping
+    pil[0].save(DOCS / "demo.webp", save_all=True, append_images=pil[1:], duration=durations, loop=0,
+                quality=82, method=6, minimize_size=False, allow_mixed=False)
     toasts.hide()
     settings.set("menu_scale", 1.0)
 
@@ -259,7 +266,7 @@ def window_png(widget, path: Path, wait: int = 900) -> None:
 def main() -> None:
     settings.set("theme", "dark")
     photo = sample_photo()
-    demo_gif(photo)
+    demo_animation(photo)
     menu_png(photo)
     cards_png(photo)
     window_png(prompts.ResizePrompt([photo]), DOCS / "prompt.png", 400)
@@ -270,7 +277,7 @@ def main() -> None:
     window = SettingsWindow()
     window.nav.setCurrentRow(WATCH_PAGE)
     window_png(window, DOCS / "watch.png", 400)
-    for name in ("demo.gif", "menu.png", "cards.png", "prompt.png", "settings.png", "watch.png"):
+    for name in ("demo.webp", "menu.png", "cards.png", "prompt.png", "settings.png", "watch.png"):
         print(f"{name:<13} {(DOCS / name).stat().st_size / 1024:7.0f} KB")
 
 

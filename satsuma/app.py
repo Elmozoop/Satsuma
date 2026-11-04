@@ -236,7 +236,14 @@ class Satsuma(QObject):
         self.menu.open_for(paths, QCursor.pos())
 
     def undo_last(self) -> None:
-        """Send the last job's results to the Recycle Bin (same as Undo on its card)."""
+        """Undo the last job, like Undo on its card: renames get their old names back, anything
+        else goes to the Recycle Bin."""
+        from .engine import rename
+
+        if rename.can_undo(self._last_outputs):
+            rename.undo(self._last_outputs)
+            self._last_outputs = []
+            return
         targets = [p for p in undo_targets(self._last_outputs) if p.exists()]
         if not targets:
             return

@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Callable
 
 from . import filetypes as ft
-from .engine import archives, documents, media
+from .engine import archives, documents, media, ocr, rename
 from .engine import ffmpeg_tool as ff
 
 Progress = Callable[[float, str], None]
@@ -113,7 +113,9 @@ def _image_actions() -> list[Action]:
         Action("img-rotate", "Rotate", "90° clockwise", "tools",
                _each(lambda p, _params: images.rotate(p, 90)), icon="rotate"),
         Action("img-flip", "Flip", "mirror", "tools",
-               _each(lambda p, _params: images.flip(p, horizontal=True)), icon="flip"),
+               _each(lambda p, _params: images.flip(p, horizontal=True)), icon="flip", hidden_by_default=True),
+        Action("img-text", "Text", "copy the words", "tools",
+               _each(lambda p, _params: ocr.to_text(p)), icon="text"),
         Action("img-clean", "Clean", "remove location & camera info", "tools",
                _each(lambda p, _params: images.strip_metadata(p)), icon="clean"),
         Action("img-bw", "B&W", "black and white", "tools",
@@ -153,7 +155,10 @@ def _video_actions() -> list[Action]:
                _each(lambda p, params: media.change_speed(p, params["factor"])),
                needs_ffmpeg=True, prompt="speed", icon="speed"),
         Action("vid-rotate", "Rotate", "90° clockwise", "tools",
-               _each(lambda p, _params: media.rotate_video(p)), needs_ffmpeg=True, icon="rotate"),
+               _each(lambda p, _params: media.rotate_video(p)), needs_ffmpeg=True, icon="rotate",
+               hidden_by_default=True),
+        Action("vid-level", "Level", "even out volume", "tools",
+               _each(lambda p, _params: media.normalize_volume(p)), needs_ffmpeg=True, icon="volume"),
         Action("vid-boomerang", "Boomerang", "looping GIF", "tools",
                _each(lambda p, _params: media.boomerang(p)), needs_ffmpeg=True, icon="boomerang"),
         Action("vid-join", "Join", "end to end", "tools",
@@ -176,6 +181,8 @@ def _audio_actions() -> list[Action]:
         Action("aud-trim", "Trim", "start → end", "tools",
                _each(lambda p, params: media.trim(p, params["start"], params["end"])),
                needs_ffmpeg=True, prompt="trim", icon="trim"),
+        Action("aud-level", "Level", "even out volume", "tools",
+               _each(lambda p, _params: media.normalize_volume(p)), needs_ffmpeg=True, icon="volume"),
         Action("aud-join", "Join", "end to end", "tools",
                _all(lambda ps, _params: media.concat(ps)), min_files=2, needs_ffmpeg=True, icon="join"),
     ]
@@ -246,6 +253,9 @@ def _document_actions(paths: list[Path]) -> list[Action]:
 # ----------------------------------------------------------------------------- shared
 ZIP = Action("any-zip", "ZIP", "compress to zip", "tools",
              _all(lambda ps, _params: archives.zip_files(ps)), icon="zip")
+RENAME = Action("any-rename", "Rename", "number them", "tools",
+                _all(lambda ps, params: rename.rename(ps, params["pattern"], params.get("start", 1))),
+                min_files=2, prompt="rename", icon="rename")
 EXTRACT = Action("zip-extract", "Extract", "unpack here", "tools",
                  _each(lambda p, _params: archives.extract(p)), icon="extract")
 MIXED_PDF = Action("mix-pdf", "PDF", "merge all", "convert",
@@ -283,6 +293,8 @@ def actions_for(paths, customise: bool = True) -> list[Action]:
     ]
     if category != ft.ARCHIVE or not all(p.suffix.lower() == ".zip" for p in paths):   # no zip of a zip
         visible.append(ZIP)
+    if len(paths) >= RENAME.min_files:
+        visible.append(RENAME)
     return customised(category, visible) if customise else visible
 
 
@@ -313,14 +325,14 @@ def catalogue() -> list[tuple[str, str, list[Action]]]:
     docs = [_doc_action(e) for e in (".pdf", ".docx", ".doc", ".odt", ".rtf", ".txt", ".html", ".md",
                                      ".pptx", ".ppt", ".odp", ".xlsx", ".xls", ".ods", ".csv", ".json")]
     return [
-        (ft.IMAGE, "Images", _image_actions() + [ZIP]),
-        (ft.VIDEO, "Videos", _video_actions() + [ZIP]),
-        (ft.AUDIO, "Audio", _audio_actions() + [ZIP]),
-        (ft.PDF, "PDFs", _pdf_actions() + [ZIP]),
-        (ft.DOCUMENT, "Documents", docs + [ZIP]),
-        (ft.ARCHIVE, "Archives", [EXTRACT, ZIP]),
-        (ft.MIXED, "Mixed files", [MIXED_PDF, ZIP]),
-        (ft.OTHER, "Other files", [ZIP]),
+        (ft.IMAGE, "Images", _image_actions() + [ZIP, RENAME]),
+        (ft.VIDEO, "Videos", _video_actions() + [ZIP, RENAME]),
+        (ft.AUDIO, "Audio", _audio_actions() + [ZIP, RENAME]),
+        (ft.PDF, "PDFs", _pdf_actions() + [ZIP, RENAME]),
+        (ft.DOCUMENT, "Documents", docs + [ZIP, RENAME]),
+        (ft.ARCHIVE, "Archives", [EXTRACT, ZIP, RENAME]),
+        (ft.MIXED, "Mixed files", [MIXED_PDF, ZIP, RENAME]),
+        (ft.OTHER, "Other files", [ZIP, RENAME]),
     ]
 
 

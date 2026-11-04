@@ -5,7 +5,7 @@
 A Windows take on the drag-to-convert idea: convert, compress, trim, merge, lock and edit files
 without opening a single app. Everything runs **locally on your PC** — files are never uploaded.
 
-![demo](docs/demo.gif)
+![Satsuma in action: Shift-drag a photo, the ring opens, drop it on WEBP](docs/demo.webp)
 
 ---
 
@@ -50,7 +50,8 @@ Prefer a standalone `.exe`? See [Build an .exe](#build-an-exe).
 - **Recent** — your last 10 results; click one to see it in its folder.
 - **Undo** — the last conversion, even after its card has gone.
 
-Your original file is **never changed, moved or deleted**. Results are saved next to it
+Your original file is **never changed, moved or deleted** (the one exception is **Rename**, which
+renames the files you chose; its Undo puts the old names back). Results are saved next to it
 (e.g. `photo.png` → `photo.webp`), and if that name is taken you get `photo (1).webp`.
 
 > Shift normally means *move* when you drag in Explorer. Satsuma always takes the drop as a
@@ -60,16 +61,16 @@ Your original file is **never changed, moved or deleted**. Results are saved nex
 
 | Files | Convert to | Tools |
 |---|---|---|
-| **Images** — PNG, JPG, WEBP, GIF, BMP, TIFF, ICO, HEIC, AVIF… | PNG · JPG · WEBP · GIF · TIFF · ICO · AVIF · HEIC · BMP · PDF | Compress · Resize · Rotate · Flip · **Clean** (removes location and camera details) · B&W · Square |
-| **Videos** — MP4, MOV, MKV, WEBM, AVI… | MP4 · MOV · MKV · WEBM · AVI · GIF · MP3 | Compress · Trim · Mute · Frame grab · Speed (¼×–4×) · Rotate · Boomerang GIF · Join |
-| **Audio** — MP3, WAV, M4A, FLAC, OGG, OPUS, AIFF… | MP3 · M4A · WAV · FLAC · OGG · OPUS · AIFF | Trim · Join |
+| **Images** — PNG, JPG, WEBP, GIF, BMP, TIFF, ICO, HEIC, AVIF… | PNG · JPG · WEBP · GIF · TIFF · ICO · AVIF · HEIC · BMP · PDF | Compress · Resize · Rotate · **Text** (copies the words in a picture, offline) · **Clean** (removes location and camera details) · B&W · Square · Flip |
+| **Videos** — MP4, MOV, MKV, WEBM, AVI… | MP4 · MOV · MKV · WEBM · AVI · GIF · MP3 | Compress · Trim · Mute · Frame grab · Speed (¼×–4×) · **Level** (even out the volume) · Boomerang GIF · Rotate · Join |
+| **Audio** — MP3, WAV, M4A, FLAC, OGG, OPUS, AIFF… | MP3 · M4A · WAV · FLAC · OGG · OPUS · AIFF | Trim · **Level** (even out the volume) · Join |
 | **PDF** | PNG · JPG (per page) · TXT | Merge · Compress · Split · Extract pages · Rotate · Page numbers · Lock / Unlock (password) |
 | **Word** — DOCX, DOC, ODT, RTF | PDF · DOCX · DOC · RTF · ODT · TXT · HTML | |
 | **Excel** — XLSX, XLS, ODS, CSV | PDF · XLSX · XLS · ODS · CSV · JSON (from CSV) | |
 | **PowerPoint** — PPTX, PPT, ODP | PDF · PPTX · PPT · ODP | |
 | **Text & web** — TXT, Markdown, HTML, JSON | PDF · HTML ⇄ Markdown · TXT · DOCX (from HTML) · JSON → CSV | |
 | **Archives** — ZIP, 7Z, RAR, TAR, TAR.GZ, GZ… | | Extract |
-| **Anything** | | ZIP |
+| **Anything** | | ZIP · **Rename** several files at once (`Trip 01`, `Trip 02`…), with a preview |
 
 Drop **several files** at once to batch them, or to **merge** (PDFs, images → one PDF) and
 **join** (videos, audio) them. Merging and joining go in file-name order — `part1`, `part2`,

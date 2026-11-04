@@ -383,8 +383,69 @@ class CompressPrompt(_Base):
         return None
 
 
+class RenamePrompt(_Base):
+    """Pick a name pattern; see exactly what each file will be called before anything changes."""
+    ok_text = "Rename"
+
+    def __init__(self, paths: list[Path]):
+        import os
+
+        super().__init__("Rename", f"{len(paths)} files, numbered in file-name order", paths)
+        self.paths = paths
+        stems = [p.stem for p in paths]
+        guess = os.path.commonprefix(stems).rstrip(" _-0123456789") or "File"
+        self.name = QLineEdit(f"{guess} ##")
+        self.name.textChanged.connect(self._preview)
+        self.start = QSpinBox(minimum=0, maximum=999999, value=1)
+        self.start.valueChanged.connect(self._preview)
+        self.grid.addWidget(QLabel("Name"), 0, 0)
+        self.grid.addWidget(self.name, 0, 1)
+        self.grid.addWidget(QLabel("Start at"), 1, 0)
+        self.grid.addWidget(self.start, 1, 1)
+        hint = QLabel("# marks where the number goes; ## pads it to two digits (01, 02 …).")
+        hint.setObjectName("hint")
+        hint.setWordWrap(True)
+        self.grid.addWidget(hint, 2, 0, 1, 2)
+        self.preview = QLabel()
+        self.preview.setObjectName("example")
+        self.preview.setWordWrap(True)
+        self.grid.addWidget(self.preview, 3, 0, 1, 2)
+        note = QLabel("This renames the files themselves. Undo on the card puts the old names back.")
+        note.setObjectName("hint")
+        note.setWordWrap(True)
+        self.grid.addWidget(note, 4, 0, 1, 2)
+        self._preview()
+        self.name.setFocus()
+        self.name.selectAll()
+
+    def _plan(self):
+        from ..engine import rename
+
+        return rename.plan(self.paths, self.name.text(), self.start.value())
+
+    def _preview(self) -> None:
+        try:
+            steps = self._plan()
+        except ValueError as exc:
+            self.preview.setText(str(exc))
+            return
+        lines = [f"{old.name}  →  {new.name}" for old, new in steps[:4]]
+        if len(steps) > 4:
+            lines.append(f"… and {len(steps) - 4} more")
+        self.preview.setText("\n".join(lines))
+
+    def validate(self) -> str | None:
+        try:
+            self._plan()
+        except ValueError as exc:
+            return str(exc)
+        self.result_params = {"pattern": self.name.text(), "start": self.start.value()}
+        return None
+
+
 PROMPTS = {"resize": ResizePrompt, "trim": TrimPrompt, "pages": PagesPrompt, "lock": LockPrompt,
-           "unlock": UnlockPrompt, "speed": SpeedPrompt, "compress": CompressPrompt}
+           "unlock": UnlockPrompt, "speed": SpeedPrompt, "compress": CompressPrompt,
+           "rename": RenamePrompt}
 
 
 def ask(kind: str, paths: list[Path]) -> dict | None:
