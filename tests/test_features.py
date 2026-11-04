@@ -238,3 +238,52 @@ def test_dragging_a_card_hands_over_the_file(qapp, workdir, monkeypatch):
     toasts._start_drag(toasts._card(1))
     assert handed == {"files": [out], "image": True}
     toasts.hide()
+
+
+# ----------------------------------------------------------------------------- compress to a chosen size
+@pytest.mark.parametrize("ratio", [0.5, 0.2, 0.05])
+def test_image_compress_lands_at_the_chosen_size(tmp_path, ratio):
+    photo = tmp_path / "noisy.png"
+    Image.effect_noise((1200, 800), 40).convert("RGB").save(photo)
+    out = images.compress_to(photo, ratio)
+    assert out.stat().st_size <= photo.stat().st_size * ratio
+    assert out.stat().st_size >= photo.stat().st_size * ratio * 0.4     # not needlessly far below
+    with Image.open(out) as result:
+        result.load()                                                    # still a valid picture
+
+
+def test_image_compress_keeps_transparency(workdir):
+    out = images.compress_to(workdir / "alpha.png", 0.3)
+    assert out.suffix == ".webp" and Image.open(out).mode == "RGBA"
+
+
+def test_pdf_compress_steps_down_towards_the_target(tmp_path):
+    picture = tmp_path / "scan.jpg"
+    Image.effect_noise((2400, 3200), 60).convert("RGB").save(picture, quality=95)
+    pdf = images.to_pdf([picture])
+    gentle = pdfs.compress_to(pdf, 0.9)
+    strong = pdfs.compress_to(pdf, 0.05)
+    assert strong.stat().st_size < gentle.stat().st_size <= pdf.stat().st_size
+    assert len(PdfReader(str(strong)).pages) == 1
+
+
+def test_compress_prompt_shows_size_and_warns(qapp, workdir):
+    from satsuma.ui.prompts import CompressPrompt
+
+    dialog = CompressPrompt([workdir / "photo.jpg"])
+    assert "Now:" in dialog.now.text()
+    dialog.slider.setValue(40)
+    assert dialog.warning.objectName() == "hint"
+    dialog.slider.setValue(20)
+    assert dialog.warning.objectName() == "warn"
+    dialog.slider.setValue(6)
+    assert dialog.warning.objectName() == "error" and "unreadable" in dialog.warning.text()
+    assert dialog.validate() is None and dialog.result_params == {"ratio": 0.06}
+    dialog.close()
+
+
+def test_watched_folders_can_still_compress_without_asking():
+    from satsuma.watcher import watchable_actions
+
+    ids = {action.id for _label, _cat, action in watchable_actions()}
+    assert {"img-compress", "pdf-compress", "vid-compress"} <= ids

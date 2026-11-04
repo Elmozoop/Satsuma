@@ -66,6 +66,28 @@ def compress_video(source, max_height: int = 1080, crf: int = 28) -> Path:
     return destination
 
 
+def compress_video_to(source, ratio: float) -> Path:
+    """Aim for `ratio` × the original size: work out the bitrate that lands there, and lower the
+    resolution when that bitrate is too small to look good at full size."""
+    source = Path(source)
+    duration = ff.duration_of(source)
+    if duration <= 0:
+        return compress_video(source)
+    target_bits = source.stat().st_size * ratio * 8 * 0.96      # a little headroom for the container
+    audio_kbps = 96 if ff.has_audio(source) else 0
+    video_kbps = max(80, int(target_bits / duration / 1000) - audio_kbps)
+    height = 1080 if video_kbps >= 2500 else 720 if video_kbps >= 1100 else 480 if video_kbps >= 450 else 360
+    destination = target_path(source, ".mp4", stem=f"{source.stem}-compressed")
+    audio = ["-c:a", "aac", "-b:a", f"{audio_kbps}k"] if audio_kbps else ["-an"]
+    ff.run([
+        "-i", str(source), "-map", "0:v:0", "-map", "0:a?", "-vf", _even_scale(height),
+        "-c:v", "libx264", "-preset", "medium", "-b:v", f"{video_kbps}k",
+        "-maxrate", f"{int(video_kbps * 1.4)}k", "-bufsize", f"{video_kbps * 2}k", "-pix_fmt", "yuv420p",
+        *audio, "-movflags", "+faststart", str(destination),
+    ])
+    return destination
+
+
 def trim(source, start: float, end: float) -> Path:
     """Cut [start, end] seconds. Re-encodes for frame-accurate cuts."""
     source = Path(source)

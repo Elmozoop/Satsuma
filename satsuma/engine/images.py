@@ -1,6 +1,7 @@
 """Image conversion, compression, resizing and rotation (Pillow)."""
 from __future__ import annotations
 
+import io
 from pathlib import Path
 
 from PIL import Image, ImageOps
@@ -126,6 +127,49 @@ def compress(source, quality: int | None = None) -> Path:
         prepared = _prepare(image, pil_format)
         destination = target_path(source, extension, stem=f"{source.stem}-compressed")
         _save(prepared, destination, pil_format, quality)
+    return destination
+
+
+def compress_to(source, ratio: float) -> Path:
+    """Re-save at about `ratio` × the original size: the best quality that fits, and only if even
+    the lowest quality is too big, fewer pixels too."""
+    source = Path(source)
+    target = max(1024, int(source.stat().st_size * ratio))
+    extension = source.suffix.lower()
+    pil_format = PIL_FORMAT.get(extension)
+    with _load(source) as probe_image:
+        has_alpha = probe_image.mode in ("RGBA", "LA", "PA") or (
+            probe_image.mode == "P" and "transparency" in probe_image.info)
+    if pil_format not in LOSSY:
+        extension, pil_format = (".webp", "WEBP") if has_alpha else (".jpg", "JPEG")
+
+    def encode(image, quality: int) -> bytes:
+        buffer = io.BytesIO()
+        _save(image, buffer, pil_format, quality)
+        return buffer.getvalue()
+
+    with _load(source) as original:
+        image = _prepare(original, pil_format)
+        best = None
+        for _attempt in range(8):
+            low, high = 5, 95
+            while low <= high:                      # highest quality that still fits
+                middle = (low + high) // 2
+                data = encode(image, middle)
+                if len(data) <= target:
+                    best, low = data, middle + 1
+                else:
+                    high = middle - 1
+            if best is not None or min(image.size) <= 32:
+                break
+            # Even quality 5 is too big: fewer pixels, then try again.
+            factor = max(0.35, min(0.9, (target / len(encode(image, 5))) ** 0.5 * 0.95))
+            image = image.resize((max(16, round(image.size[0] * factor)), max(16, round(image.size[1] * factor))),
+                                 Image.LANCZOS)
+        if best is None:
+            best = encode(image, 5)                 # as small as it gets
+    destination = target_path(source, extension, stem=f"{source.stem}-compressed")
+    destination.write_bytes(best)
     return destination
 
 

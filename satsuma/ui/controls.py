@@ -161,6 +161,7 @@ def stylesheet() -> str:
     QLabel#promptTitle {{ font-size: 15pt; font-weight: 600; }}
     QLabel#thumb {{ background: {card}; border: 1px solid {line}; border-radius: 10px; }}
     QLabel#error {{ color: {pal.danger.name()}; }}
+    QLabel#warn {{ color: {"#F5B23D" if dark else "#B06E00"}; }}
     QRadioButton {{ spacing: 8px; background: transparent; }}
     QRadioButton::indicator {{ width: 12px; height: 12px; border-radius: 8px; background: {field};
                                border: 2px solid {muted}; }}

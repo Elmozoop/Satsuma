@@ -34,10 +34,11 @@ PLATE_PAD = 8.0     # plate extends this far beyond the wedges
 GAP = 5.0           # straight gap between wedges (px at 100 %)
 CORNER = 9.0        # wedge corner radius (px at 100 %)
 STAGGER = 0.024     # seconds between wedges appearing
+HUB_SETTLE = 0.35   # resting this long on the centre (where the ring opened) arms the ring swap
 
 # Subtle tints for convert wedges, by what they produce (only when "type_colors" is on).
-TYPE_TINTS = {ft.IMAGE: QColor(56, 160, 255), ft.VIDEO: QColor(168, 104, 255),
-              ft.AUDIO: QColor(52, 199, 120), ft.DOCUMENT: QColor(240, 180, 40), ft.PDF: QColor(240, 180, 40)}
+# Documents and PDFs stay neutral: a gold PDF wedge stood out too much in a ring of image formats.
+TYPE_TINTS = {ft.IMAGE: QColor(56, 160, 255), ft.VIDEO: QColor(168, 104, 255), ft.AUDIO: QColor(52, 199, 120)}
 
 
 def result_kind(action: Action) -> str | None:
@@ -111,7 +112,9 @@ class RadialView:
         self.hub_text = ("", "")
         self.hub_prev = ("", "")
         self.hover: Wedge | str | None = None   # Wedge, "hub", or None
-        self.hub_armed = False                  # cursor must leave the hub before dwell counts
+        self.hub_armed = False                  # dwell counts once the cursor left the hub or settled on it
+        self._hub_settle = 0.0
+        self._settle_used = False               # holding still swaps once; after that, move off and back
         self.dwell = 0.0
         self.dwell_enabled = True
         self.chosen: Wedge | None = None
@@ -168,6 +171,8 @@ class RadialView:
         self.page_pos.snap(0.0)
         self.hover = None
         self.hub_armed = False
+        self._hub_settle = 0.0
+        self._settle_used = False
         self.dwell = 0.0
         self.chosen = None
         self.confirm.snap(0.0)
@@ -252,6 +257,7 @@ class RadialView:
             self.hover = target
             if target != "hub":
                 self.hub_armed = True
+            self._hub_settle = 0.0
             for wedge in self.wedges:
                 wedge.hover.to(1.0 if wedge is target else 0.0)
             self._update_hub_text()
@@ -263,6 +269,7 @@ class RadialView:
         self.page_pos.to(float(self.page))
         self.dwell = 0.0
         self.hub_armed = False
+        self._hub_settle = 0.0
         for wedge in self.wedges:
             wedge.hover.to(0.0)
         self._stagger_in(True, self.page)
@@ -317,6 +324,16 @@ class RadialView:
             moving |= wedge.hover.step(dt)
             moving |= wedge.appear.step(dt)
         switched = False
+        if (self.dwell_enabled and self.hover == "hub" and not self.hub_armed and len(self.pages) > 1
+                and not self.closed and self.opening.value > 0.95 and not self._settle_used):
+            # The ring opened right under the cursor. Holding still on the centre is a choice too:
+            # after a short settle (so merely passing through doesn't count) the swap timer starts.
+            self._hub_settle += dt
+            if self._hub_settle >= HUB_SETTLE:
+                self.hub_armed = True
+                self._settle_used = True
+                self._update_hub_text()
+            moving = True
         if (self.dwell_enabled and self.hover == "hub" and self.hub_armed and len(self.pages) > 1
                 and not self.closed):
             before = self.dwell

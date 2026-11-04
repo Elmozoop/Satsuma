@@ -46,6 +46,7 @@ class Action:
     skip_ext: tuple[str, ...] = field(default_factory=tuple)  # hide if every source has one of these
     icon: str | None = None    # name from ui/icons.py; None = big text label
     hidden_by_default: bool = False  # rarely needed: off until ticked in Settings
+    unattended: bool = False   # has a prompt, but also runs fine without one (watched folders)
 
 
 def _each(fn) -> Callable[[list[Path], dict, Progress], list[Path]]:
@@ -102,7 +103,8 @@ def _image_actions() -> list[Action]:
         Action("img-pdf", "PDF", "one document", "convert",
                _all(lambda ps, _params: images.to_pdf(ps))),
         Action("img-compress", "Compress", "smaller file", "tools",
-               _each(lambda p, _params: images.compress(p)), icon="compress"),
+               _each(lambda p, params: images.compress_to(p, params["ratio"]) if "ratio" in params
+                     else images.compress(p)), prompt="compress", unattended=True, icon="compress"),
         Action("img-resize", "Resize", "scale or width", "tools",
                _each(lambda p, params: images.resize(p, scale=params.get("scale"),
                                                      width=params.get("width"),
@@ -136,8 +138,10 @@ def _video_actions() -> list[Action]:
                _each(lambda p, _params: media.to_gif(p)), needs_ffmpeg=True),
         Action("vid-mp3", "MP3", "audio only", "convert",
                _each(lambda p, _params: media.extract_audio(p, ".mp3")), needs_ffmpeg=True),
-        Action("vid-compress", "Compress", "1080p max", "tools",
-               _each(lambda p, _params: media.compress_video(p)), needs_ffmpeg=True, icon="compress"),
+        Action("vid-compress", "Compress", "smaller file", "tools",
+               _each(lambda p, params: media.compress_video_to(p, params["ratio"]) if "ratio" in params
+                     else media.compress_video(p)),
+               needs_ffmpeg=True, prompt="compress", unattended=True, icon="compress"),
         Action("vid-trim", "Trim", "start → end", "tools",
                _each(lambda p, params: media.trim(p, params["start"], params["end"])),
                needs_ffmpeg=True, prompt="trim", icon="trim"),
@@ -203,7 +207,8 @@ def _pdf_actions(paths: list[Path] | None = None) -> list[Action]:
         Action("pdf-txt", "TXT", "extract text", "convert",
                _each(lambda p, _params: pdfs.to_text(p))),
         Action("pdf-compress", "Compress", "shrink images", "tools",
-               _each(lambda p, _params: pdfs.compress(p)), icon="compress"),
+               _each(lambda p, params: pdfs.compress_to(p, params["ratio"]) if "ratio" in params
+                     else pdfs.compress(p)), prompt="compress", unattended=True, icon="compress"),
         Action("pdf-split", "Split", "file per page", "tools",
                _each(lambda p, _params: pdfs.split_pages(p)), icon="split"),
         Action("pdf-pages", "Pages", "extract range", "tools",

@@ -32,7 +32,7 @@ def test_wedge_tints_follow_what_an_action_makes(workdir):
 
     by_id = {a.id: a for a in actions.actions_for([workdir / "photo.jpg"], customise=False)}
     assert result_kind(by_id["img-png"]) == "image"
-    assert result_kind(by_id["img-pdf"]) == "pdf"
+    assert result_kind(by_id["img-pdf"]) is None                   # documents stay neutral (no yellow)
     assert result_kind(by_id["img-compress"]) is None               # tools stay neutral
 
 

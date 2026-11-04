@@ -24,7 +24,7 @@ def watchable_actions() -> list[tuple[str, str, Action]]:
     found, seen = [], set()
     for category, label, actions in catalogue():
         for action in actions:
-            if action.prompt or action.min_files > 1 or (category, action.id) in seen:
+            if (action.prompt and not action.unattended) or action.min_files > 1 or (category, action.id) in seen:
                 continue
             seen.add((category, action.id))
             found.append((label, category, action))

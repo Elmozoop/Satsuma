@@ -304,8 +304,87 @@ class SpeedPrompt(_Base):
         return None
 
 
+COMPRESS_PRESETS = [("Light", 75), ("Balanced", 50), ("Strong", 25), ("Tiny", 10)]
+NOTICEABLE, DAMAGING = 25, 12      # % of the original size where warnings start
+
+
+def _human(num: float) -> str:
+    for unit in ("B", "KB", "MB", "GB"):
+        if num < 1024 or unit == "GB":
+            return f"{num:.0f} {unit}" if unit in ("B", "KB") else f"{num:.1f} {unit}"
+        num /= 1024
+    return f"{num:.1f} GB"
+
+
+class CompressPrompt(_Base):
+    """Shows the current size and lets you pick how small, warning before it gets destructive."""
+    ok_text = "Compress"
+
+    def __init__(self, paths: list[Path]):
+        self.total = sum(p.stat().st_size for p in paths if p.is_file())
+        suffix = paths[0].suffix.lower()
+        self.thing = ("the video" if suffix in {".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v", ".wmv"}
+                      else "the pictures inside" if suffix == ".pdf" else "the picture")
+        who = paths[0].name if len(paths) == 1 else f"{len(paths)} files"
+        super().__init__("Compress", f"{who} · now {_human(self.total)}", paths)
+        from PySide6.QtWidgets import QHBoxLayout, QPushButton, QSlider
+
+        self.now = QLabel(f"Now: <b>{_human(self.total)}</b>")
+        self.now.setTextFormat(Qt.RichText)
+        self.grid.addWidget(self.now, 0, 0, 1, 2)
+
+        presets = QHBoxLayout()
+        self.preset_buttons = []
+        for name, percent in COMPRESS_PRESETS:
+            button = QPushButton(f"{name}\n{percent}%")
+            button.setCheckable(True)
+            button.setObjectName("segment")
+            button.clicked.connect(lambda _c=False, p=percent: self.slider.setValue(p))
+            presets.addWidget(button)
+            self.preset_buttons.append((percent, button))
+        self.grid.addLayout(presets, 1, 0, 1, 2)
+
+        self.slider = QSlider(Qt.Horizontal)
+        self.slider.setRange(3, 95)
+        self.slider.valueChanged.connect(self._changed)
+        self.grid.addWidget(QLabel("Keep"), 2, 0)
+        self.grid.addWidget(self.slider, 2, 1)
+        self.target = QLabel()
+        self.target.setObjectName("promptTitle")
+        self.grid.addWidget(self.target, 3, 0, 1, 2)
+        self.warning = QLabel()
+        self.warning.setWordWrap(True)
+        self.grid.addWidget(self.warning, 4, 0, 1, 2)
+        self.slider.setValue(50)
+        self._changed(50)
+
+    def _changed(self, percent: int) -> None:
+        target = self.total * percent / 100
+        self.target.setText(f"→ about {_human(target)}   (−{100 - percent}%)")
+        for value, button in self.preset_buttons:
+            button.setChecked(value == percent)
+        if percent <= DAMAGING:
+            self.warning.setObjectName("error")
+            self.warning.setText(f"⚠ Very strong. {self.thing.capitalize()} may become unreadable or badly "
+                                 "damaged: text and fine detail can turn into blocks or blur.")
+        elif percent <= NOTICEABLE:
+            self.warning.setObjectName("warn")
+            self.warning.setText(f"Strong. Quality of {self.thing} will drop noticeably. "
+                                 "Small text may be hard to read.")
+        else:
+            self.warning.setObjectName("hint")
+            self.warning.setText("Satsuma aims for this size and keeps as much quality as fits. "
+                                 "Your original isn't changed.")
+        self.warning.style().unpolish(self.warning)
+        self.warning.style().polish(self.warning)
+
+    def validate(self) -> str | None:
+        self.result_params = {"ratio": self.slider.value() / 100}
+        return None
+
+
 PROMPTS = {"resize": ResizePrompt, "trim": TrimPrompt, "pages": PagesPrompt, "lock": LockPrompt,
-           "unlock": UnlockPrompt, "speed": SpeedPrompt}
+           "unlock": UnlockPrompt, "speed": SpeedPrompt, "compress": CompressPrompt}
 
 
 def ask(kind: str, paths: list[Path]) -> dict | None:

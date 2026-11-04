@@ -174,6 +174,35 @@ def compress(source, max_image_edge: int = 1600, quality: int = 70) -> Path:
     Text and vectors are preserved; only raster images are re-encoded.
     """
     source = Path(source)
+    writer = _shrunk(source, max_image_edge, quality)
+    destination = target_path(source, ".pdf", stem=f"{source.stem}-compressed")
+    return _write(writer, destination)
+
+
+# Gentlest first: the first level that reaches the chosen size wins.
+PDF_LEVELS = [(2000, 80), (1600, 70), (1400, 55), (1200, 45), (1000, 35), (800, 28), (600, 22), (450, 15)]
+
+
+def compress_to(source, ratio: float) -> Path:
+    """Shrink towards `ratio` × the original size by stepping down picture quality and size.
+    Text stays sharp at every level; only pictures get softer."""
+    source = Path(source)
+    target = int(source.stat().st_size * ratio)
+    smallest = None
+    for edge, quality in PDF_LEVELS:
+        buffer = io.BytesIO()
+        _shrunk(source, edge, quality).write(buffer)
+        data = buffer.getvalue()
+        if smallest is None or len(data) < len(smallest):
+            smallest = data
+        if len(data) <= target:
+            break
+    destination = target_path(source, ".pdf", stem=f"{source.stem}-compressed")
+    destination.write_bytes(smallest)
+    return destination
+
+
+def _shrunk(source: Path, max_image_edge: int, quality: int) -> PdfWriter:
     reader = _reader(source)
     writer = PdfWriter()
     for page in reader.pages:
@@ -205,9 +234,7 @@ def compress(source, max_image_edge: int = 1600, quality: int = 70) -> Path:
             page.compress_content_streams()
         except Exception:
             pass
-
-    destination = target_path(source, ".pdf", stem=f"{source.stem}-compressed")
-    return _write(writer, destination)
+    return writer
 
 
 # ----------------------------------------------------------------------------- passwords

@@ -32,7 +32,16 @@ from satsuma.ui.toast import Toasts  # noqa: E402
 
 DOCS = ROOT / "docs"
 WORK = Path(tempfile.mkdtemp(prefix="satsuma-shot-files-"))
-FPS = 15
+FPS = 25           # 40 ms a frame: GIF stores this exactly, so playback is even
+
+
+def frames_for(seconds: float) -> int:
+    return max(1, round(seconds * FPS))
+
+
+def ease(t: float) -> float:
+    """Ease in and out, the way a hand moves a mouse."""
+    return t * t * (3 - 2 * t)
 
 
 def spin(ms: int) -> None:
@@ -123,12 +132,13 @@ def demo_gif(photo: Path) -> None:
         frames.append(image)
 
     # 1. drag the file in (Shift held), the ring springs open under the cursor
-    for i in range(12):
-        t = (i + 1) / 12
+    steps = frames_for(0.8)
+    for i in range(steps):
+        t = ease((i + 1) / steps)
         cursor = QPointF(40 + (centre.x() - 40) * t, 320 + (centre.y() - 320) * t)
         frame()
     view.open(animate=True)
-    for _ in range(12):
+    for _ in range(frames_for(0.7)):
         view.tick(dt)
         frame()
     # 2. glide across a few wedges
@@ -136,31 +146,32 @@ def demo_gif(photo: Path) -> None:
     route = [wedges[i % len(wedges)] for i in (6, 7, 0, 1)]
     for wedge in route:
         start, end = cursor, view.wedge_center(wedge, centre)
-        for i in range(7):
-            t = (i + 1) / 7
+        steps = frames_for(0.42)
+        for i in range(steps):
+            t = ease((i + 1) / steps)
             cursor = QPointF(start.x() + (end.x() - start.x()) * t, start.y() + (end.y() - start.y()) * t)
             target = view.hit(cursor, centre)
             view.set_hover(target if isinstance(target, Wedge) else None)
             view.tick(dt)
             frame()
-        for _ in range(3):
+        for _ in range(frames_for(0.3)):
             view.tick(dt)
             frame()
     # 3. drop on WEBP: the tick, then the ring closes and the card arrives
     chosen = route[-1]
     view.confirm_choice(chosen)
-    for _ in range(6):
+    for _ in range(frames_for(0.3)):
         view.tick(dt)
         frame(carrying=False)
     view.close()
     toasts.started(1, f"{chosen.action.label} · {chosen.action.caption}", photo.name)
     toasts.sources(1, [str(photo)])
     toasts.progress(1, 0.6, "60%")
-    for _ in range(8):
+    for _ in range(frames_for(0.5)):
         view.tick(dt)
         frame(carrying=False, card=True)
     toasts.finished(1, [str(out)])
-    for _ in range(26):
+    for _ in range(frames_for(1.8)):
         view.tick(dt)
         frame(carrying=False, card=True)
 
@@ -173,7 +184,7 @@ def demo_gif(photo: Path) -> None:
     # Exact colours the eye notices if they drift: text white, the accent, the success green.
     for i, colour in enumerate(((255, 255, 255), (242, 242, 244), (20, 20, 24), (255, 138, 31), (76, 201, 128))):
         reference.paste(colour, (i * 96, height * 3, (i + 1) * 96, height * 3 + 24))
-    palette = reference.quantize(colors=160, method=Image.Quantize.MEDIANCUT)
+    palette = reference.quantize(colors=256, method=Image.Quantize.MEDIANCUT)
     gif = [f.quantize(palette=palette, dither=Image.Dither.NONE) for f in pil]
     durations = [int(1000 / FPS)] * len(gif)
     durations[-1] = 1600
