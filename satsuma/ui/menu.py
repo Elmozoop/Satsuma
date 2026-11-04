@@ -20,11 +20,9 @@ from PySide6.QtWidgets import QWidget
 
 from ..actions import Action
 from ..config import settings
-from ..explain import explain
 from .anim import FrameClock
-from .bubble import Bubble
 from .icons import draw_icon
-from .radial import PLATE_PAD, RadialView, Wedge
+from .radial import RadialView, Wedge
 from .theme import palette
 
 SENSE_SIZE = 120  # invisible sensor square, centred on the cursor
@@ -71,13 +69,6 @@ class ActionMenu(QWidget):
         self._hide_timer = QTimer(self)
         self._hide_timer.setSingleShot(True)
         self._hide_timer.timeout.connect(self._hide_if_idle)
-        # The explanation bubble beside a hovered wedge
-        self.bubble = Bubble()
-        self._bubble_for: Wedge | None = None
-        self._bubble_timer = QTimer(self)
-        self._bubble_timer.setSingleShot(True)
-        self._bubble_timer.setInterval(260)     # a short rest, so sweeping across wedges stays calm
-        self._bubble_timer.timeout.connect(self._show_bubble)
         settings.subscribe(self._on_setting)
 
     # ------------------------------------------------------------------ helpers
@@ -180,7 +171,6 @@ class ActionMenu(QWidget):
         self.activateWindow()
 
     def dismiss(self, animate: bool = True) -> None:
-        self._hide_bubble()
         self._hide_timer.stop()
         if animate and self.isVisible() and self.mode not in ("sense", "hidden"):
             self.mode = "closing"
@@ -190,7 +180,6 @@ class ActionMenu(QWidget):
         self._finish_close()
 
     def _finish_close(self) -> None:
-        self._hide_bubble()
         self.clock.stop()
         self.mode = "hidden"
         self.view.set_hover(None)
@@ -241,41 +230,6 @@ class ActionMenu(QWidget):
         self.view.set_hover(target)
         if self.view.hover is not before:
             self.clock.start()
-        self._update_bubble(self.view.hover)
-
-    # ------------------------------------------------------------------ explanation bubble
-    def _update_bubble(self, target) -> None:
-        wanted = (isinstance(target, Wedge) and settings.get("explain_actions")
-                  and self.mode in ("drop", "click", "pinned"))
-        if not wanted:
-            self._hide_bubble()
-            return
-        if target is self._bubble_for:
-            return
-        self._bubble_for = target
-        if self.bubble.isVisible():
-            self._show_bubble()                 # already reading: follow along at once
-        else:
-            self._bubble_timer.start()
-
-    def _hide_bubble(self) -> None:
-        self._bubble_timer.stop()
-        self._bubble_for = None
-        self.bubble.hide_now()
-
-    def _show_bubble(self) -> None:
-        wedge = self._bubble_for
-        if wedge is None or self.view.hover is not wedge or not self.isVisible():
-            return
-        count = len(self.view.page_wedges(wedge.page))
-        _a0, _a1, mid = self.view.wedge_angle(wedge.index, count)
-        if count == 1:
-            mid = -math.pi / 2
-        reach = self.view.radius + (PLATE_PAD + 4) * self.view.scale
-        local = QPointF(self.center.x() + reach * math.cos(mid), self.center.y() + reach * math.sin(mid))
-        title, body, footer = explain(wedge.action)
-        self.bubble.show_for(title, body, footer, self.mapToGlobal(local.toPoint()),
-                             QPointF(math.cos(mid), math.sin(mid)))
 
     def _hide_if_idle(self) -> None:
         if not self._dropped and self.mode in ("sense", "drop"):
@@ -334,7 +288,6 @@ class ActionMenu(QWidget):
         QTimer.singleShot(0, lambda: self._choose(target, paths))
 
     def _choose(self, wedge: Wedge, paths: list[Path]) -> None:
-        self._hide_bubble()
         animate = settings.get("anim_speed") != "off"
         if animate:
             self.view.confirm_choice(wedge)    # a short tick on the chosen wedge first

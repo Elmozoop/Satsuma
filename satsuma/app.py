@@ -169,7 +169,7 @@ class Satsuma(QObject):
 
     @staticmethod
     def _idle_tooltip() -> str:
-        return f"Satsuma — hold {settings.get('modifier').title()} while dragging a file"
+        return "Satsuma"   # just the name: Windows shows one on hover, and nothing else pops up
 
     def _tray_menu_opening(self) -> None:
         self.enabled_action.setChecked(bool(settings.get("enabled")))
@@ -200,8 +200,7 @@ class Satsuma(QObject):
             outputs = [Path(o) for o in entry["outputs"]]
             name = outputs[0].name if len(outputs) == 1 else f"{outputs[0].name} +{len(outputs) - 1} more"
             label = f"{name}   ·   {history.ago(entry['time'], now)}"
-            action = self.recent_menu.addAction(label, lambda o=outputs[0]: reveal(o))
-            action.setToolTip(f"{entry.get('title', '')}\n{outputs[0]}")
+            self.recent_menu.addAction(label, lambda o=outputs[0]: reveal(o))
         self.recent_menu.addSeparator()
         self.recent_menu.addAction("Clear this list", history.clear)
 

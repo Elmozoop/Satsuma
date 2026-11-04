@@ -6,6 +6,8 @@ import pytest
 from PIL import Image
 from pypdf import PdfWriter
 
+from PySide6.QtCore import Qt
+
 from conftest import pump
 from satsuma import actions
 from satsuma.config import settings
@@ -27,7 +29,7 @@ def test_size_change_wording():
     assert size_change(None, 2048) == "2.0 KB" and size_change(1000, None) == ""
 
 
-def test_wedge_tints_follow_what_an_action_makes(workdir):
+def test_convert_wedges_share_one_tint(qapp, workdir):
     """Every convert wedge in a ring shares one tint (none looks greyed out); tools stay neutral."""
     from satsuma.ui.radial import RadialView, ring_tint
     from satsuma.ui.theme import palette
@@ -109,9 +111,10 @@ def test_tray_activity_states(qapp):
     signals.started.emit(1, "PNG", "a.jpg")
     signals.progress.emit(1, 0.5, "")
     activity._refresh()
-    assert "1 job running · 50%" in tray.tip
+    busy = tray.icon
+    assert busy is not None and busy is not base and tray.tip == ""      # progress shows on the icon only
     signals.finished.emit(1, [])
-    assert tray.tip == "Satsuma — done" and activity._rest.isActive()
+    assert tray.icon is not busy and activity._rest.isActive()
     activity._idle()
     assert tray.tip == "idle" and tray.icon is base
 
@@ -168,49 +171,60 @@ def test_type_colours_can_be_switched_off(qapp, workdir):
         settings.set("type_colors", True)
 
 
-# ----------------------------------------------------------------------------- explanation bubble
-def test_every_action_has_a_plain_description():
-    from satsuma.actions import catalogue
-    from satsuma.explain import description, explain
+# ----------------------------------------------------------------------------- editing the ring from the preview
+@pytest.fixture()
+def actions_page(qapp):
+    from satsuma.ui.settings_window import SettingsWindow
 
-    for _category, _label, group in catalogue():
-        for action in group:
-            text = description(action)
-            assert len(text) > 15 and text.endswith("."), action.id
-    title, _body, footer = explain(next(a for _c, _l, g in catalogue() for a in g if a.id == "img-webp"))
-    assert title == "WEBP · small" and "next to the original" in footer and "isn't changed" in footer
-    settings.set("output_mode", "subfolder")
-    try:
-        assert "“Converted” folder" in explain(catalogue()[0][2][0])[2]
-    finally:
-        settings.set("output_mode", "source")
+    for key in ("actions_hidden", "actions_shown", "actions_order"):
+        settings.reset([key])
+    window = SettingsWindow()
+    window.action_kind.setCurrentIndex(0)        # Images
+    yield window
+    for key in ("actions_hidden", "actions_shown", "actions_order"):
+        settings.reset([key])
+    window.close()
 
 
-def test_bubble_appears_beside_the_hovered_wedge_and_follows(qapp, workdir):
-    from satsuma.ui.menu import ActionMenu
+def _ring(window):
+    return [w.action.id for w in window.actions_preview.view.wedges if w.action.group == "convert"]
 
-    menu = ActionMenu()
-    # The drop window with a file dragged over it: unlike click mode it doesn't close when another
-    # test's window takes focus, so the bubble's short delay can't race a self-dismiss.
-    menu.open_pinned()
-    menu.paths = [workdir / "photo.jpg"]
-    menu.view.set_paths(menu.paths, animate=False)
-    pump(qapp, 400)
-    first, second = menu.view.page_wedges()[2], menu.view.page_wedges()[6]
-    menu._set_hover(first)
-    assert not menu.bubble.isVisible()                              # waits a moment first
-    assert _wait(qapp, menu.bubble.isVisible)
-    assert menu.bubble.title.startswith(first.action.label)
-    assert menu.bubble.geometry().left() > menu.geometry().center().x()   # right-hand wedge: bubble on the right
-    menu._set_hover(second)
-    assert menu.bubble.title.startswith(second.action.label)        # follows at once
-    menu._set_hover(None)
-    assert not menu.bubble.isVisible()
-    settings.set("explain_actions", False)
-    try:
-        menu._set_hover(first)
-        pump(qapp, 500)
-        assert not menu.bubble.isVisible()
-    finally:
-        settings.set("explain_actions", True)
-    menu.dismiss(animate=False)
+
+def test_replacing_a_wedge_with_one_not_on_the_ring(actions_page):
+    assert "img-bmp" not in _ring(actions_page)
+    spot = _ring(actions_page).index("img-gif")
+    actions_page._replace_action("img-gif", "img-bmp")
+    ring = _ring(actions_page)
+    assert ring.index("img-bmp") == spot and "img-gif" not in ring          # same spot, GIF off the ring
+
+
+def test_replacing_with_one_already_on_the_ring_swaps_them(actions_page):
+    before = _ring(actions_page)                  # the sample is a PNG, so JPG and TIFF are both showing
+    actions_page._replace_action("img-jpg", "img-tiff")
+    after = _ring(actions_page)
+    assert after.index("img-tiff") == before.index("img-jpg")
+    assert after.index("img-jpg") == before.index("img-tiff") and len(after) == len(before)
+
+
+def test_removing_a_wedge(actions_page):
+    actions_page._remove_action("img-ico")
+    assert "img-ico" not in _ring(actions_page)
+    row = next(i for i in range(actions_page.action_list.count())
+               if actions_page.action_list.item(i).data(Qt.UserRole) == "img-ico")
+    assert actions_page.action_list.item(row).checkState() == Qt.Unchecked   # the list agrees
+
+
+def test_clicking_a_wedge_in_the_preview_asks_what_to_put_there(actions_page, monkeypatch):
+    shown = {}
+
+    def fake_run(menu, _pos=None):
+        shown["items"] = [a.text() for a in menu.actions() if a.text()]
+        shown["held"] = actions_page.actions_preview.held
+
+    monkeypatch.setattr(actions_page, "_run_menu", fake_run)
+    wedge = next(w for w in actions_page.actions_preview.view.wedges if w.action.id == "img-gif")
+    actions_page.actions_preview.wedge_clicked.emit(wedge, actions_page.mapToGlobal(actions_page.rect().center()))
+    assert shown["items"][0] == "Replace “GIF” with" and shown["items"][-1] == "Remove from the ring"
+    assert any(t.startswith("BMP") for t in shown["items"])                 # off-ring options are offered
+    assert not any(t.startswith("Compress") for t in shown["items"])         # tools don't go on the Convert ring
+    assert shown["held"] is wedge and actions_page.actions_preview.held is None

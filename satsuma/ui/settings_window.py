@@ -15,8 +15,8 @@ from PySide6.QtWidgets import (QAbstractItemView, QButtonGroup, QComboBox, QDial
                                QWidget)
 
 from .. import watcher, winutil
-from ..actions import catalogue, is_shown
-from ..config import BIN_DIR, DATA_DIR, DEFAULTS, LOG_FILE, VERSION, settings
+from ..actions import actions_for, catalogue, is_shown
+from ..config import DATA_DIR, DEFAULTS, LOG_FILE, VERSION, settings
 from ..engine import documents
 from ..engine import ffmpeg_tool as ff
 from ..engine.paths import open_file
@@ -26,8 +26,7 @@ from .preview import SAMPLES, RadialPreview
 from .theme import ACCENT_PRESETS, palette, readable_on
 
 LOOK_KEYS = ["theme", "accent", "menu_scale", "glass_opacity", "anim_speed", "bounce", "show_icons",
-             "show_captions", "hub_info", "wedges_per_ring", "hub_switch_ms", "start_page", "type_colors",
-             "explain_actions"]
+             "show_captions", "hub_info", "wedges_per_ring", "hub_switch_ms", "start_page", "type_colors"]
 PROJECT_URL = "https://github.com/Elmozoop/Satsuma"
 PAGES = ["Appearance", "Ring actions", "Trigger", "Saving", "Watched folders", "Converters", "About"]
 WATCH_PAGE = PAGES.index("Watched folders")
@@ -400,8 +399,6 @@ class SettingsWindow(QDialog):
         centre.add("Shows", "", _segmented((("size", "Size"), ("name", "Name"), ("type", "Type")),
                                            "hub_info"))
         centre.add("Describe the action under the cursor", "", _toggle("show_captions"))
-        centre.add("Explain actions in a bubble", "A short note beside the wedge: what it does, where the file goes",
-                   _toggle("explain_actions"))
 
         reset = QPushButton("Reset appearance")
         reset.clicked.connect(self._reset_look)
@@ -420,7 +417,6 @@ class SettingsWindow(QDialog):
         self._swatches.setExclusive(True)
         for i, (name, hex_) in enumerate(ACCENT_PRESETS):
             button = QToolButton()
-            button.setToolTip(name)
             button.setCheckable(True)
             button.setAutoRaise(True)
             button.setCursor(Qt.PointingHandCursor)
@@ -431,7 +427,6 @@ class SettingsWindow(QDialog):
             self._swatches.addButton(button)
             grid.addWidget(button, 0, i)
         custom = QToolButton()
-        custom.setToolTip("Pick any colour")
         custom.setText("+")
         custom.setCursor(Qt.PointingHandCursor)
         custom.setIconSize(QSize(30, 30))
@@ -506,10 +501,8 @@ class SettingsWindow(QDialog):
         column.addWidget(self.action_list, 1)
 
         buttons = QHBoxLayout()
-        for text, handler in (("↑", lambda: self._move_selected(-1)), ("↓", lambda: self._move_selected(1))):
+        for text, handler in (("Move up", lambda: self._move_selected(-1)), ("Move down", lambda: self._move_selected(1))):
             button = QPushButton(text)
-            button.setFixedWidth(40)
-            button.setToolTip("Move up" if text == "↑" else "Move down")
             button.clicked.connect(handler)
             buttons.addWidget(button)
         buttons.addSpacing(8)
@@ -519,7 +512,6 @@ class SettingsWindow(QDialog):
             buttons.addWidget(button)
         buttons.addStretch(1)
         reset = QPushButton("Reset")
-        reset.setToolTip("Default actions and order for this kind of file")
         reset.clicked.connect(self._reset_action_list)
         buttons.addWidget(reset)
         column.addLayout(buttons)
@@ -528,6 +520,8 @@ class SettingsWindow(QDialog):
         preview_column = QVBoxLayout()
         self.actions_preview = RadialPreview()
         self.actions_preview.setMinimumSize(300, 300)
+        self.actions_preview.editable = True
+        self.actions_preview.wedge_clicked.connect(self._wedge_menu)
         preview_column.addWidget(self.actions_preview, 1)
         self.actions_preview_note = _label("", "hint", wrap=True)
         self.actions_preview_note.setAlignment(Qt.AlignCenter)
@@ -578,17 +572,26 @@ class SettingsWindow(QDialog):
         if category in SAMPLES:
             self.actions_preview.show()
             self.actions_preview.set_kind(category)
-            self.actions_preview_note.setText(f"Dragging “{SAMPLES[category][0]}”")
+            self.actions_preview_note.setText(f"Dragging “{SAMPLES[category][0]}”. "
+                                              "Click a wedge to swap in another conversion.")
         else:
             self.actions_preview.hide()
             self.actions_preview_note.setText("No preview for a mix of file types.")
 
-    def _save_action_list(self) -> None:
-        category, actions = self._current_actions()
-        by_id = {a.id: a for a in actions}
+    def _list_state(self) -> tuple[list[str], set[str]]:
+        """(action ids in list order, the ticked ones)."""
         ids = [self.action_list.item(i).data(Qt.UserRole) for i in range(self.action_list.count())]
         checked = {self.action_list.item(i).data(Qt.UserRole) for i in range(self.action_list.count())
                    if self.action_list.item(i).checkState() == Qt.Checked}
+        return ids, checked
+
+    def _save_action_list(self) -> None:
+        category, _actions = self._current_actions()
+        ids, checked = self._list_state()
+        self._store_actions(category, ids, checked)
+
+    def _store_actions(self, category: str, ids: list[str], checked: set[str]) -> None:
+        by_id = {a.id: a for a in self._current_actions()[1]}
         mine = f"{category}:"
         hidden = [h for h in (settings.get("actions_hidden") or []) if not h.startswith(mine)]
         shown = [h for h in (settings.get("actions_shown") or []) if not h.startswith(mine)]
@@ -600,6 +603,63 @@ class SettingsWindow(QDialog):
         settings.set("actions_order", order)
         settings.set("actions_shown", shown)
         settings.set("actions_hidden", hidden)
+
+    # -- editing straight from the preview ---------------------------------------------------
+    def _wedge_menu(self, wedge, position) -> None:
+        """Clicked a wedge in the preview: offer every conversion that could take its place."""
+        from PySide6.QtWidgets import QMenu
+
+        category, _actions = self._current_actions()
+        ids, checked = self._list_state()
+        offered = [a for a in actions_for(self.actions_preview.view.paths, customise=False)
+                   if a.group == wedge.action.group and a.id != wedge.action.id and a.id in ids]
+        menu = QMenu(self)
+        heading = menu.addAction(f"Replace “{wedge.action.label}” with")
+        heading.setEnabled(False)
+        for action in offered:
+            on_ring = action.id in checked
+            label = f"{action.label}  —  {action.caption}" + ("   (swap places)" if on_ring else "")
+            menu.addAction(label, lambda a=action.id: self._replace_action(wedge.action.id, a))
+        if not offered:
+            nothing = menu.addAction("Nothing else fits here")
+            nothing.setEnabled(False)
+        menu.addSeparator()
+        menu.addAction("Remove from the ring", lambda: self._remove_action(wedge.action.id))
+        self.actions_preview.hold(wedge)
+        try:
+            self._run_menu(menu, position)
+        finally:
+            if self.actions_preview.held is wedge:
+                self.actions_preview.hold(None)
+
+    @staticmethod
+    def _run_menu(menu, position) -> None:
+        menu.exec(position)
+
+    def _replace_action(self, old: str, new: str) -> None:
+        """Put `new` where `old` is. If `new` is already on the ring the two swap places;
+        otherwise `old` comes off the ring and `new` takes its spot."""
+        category, _actions = self._current_actions()
+        ids, checked = self._list_state()
+        if old not in ids or new not in ids:
+            return
+        if new in checked:
+            i, j = ids.index(old), ids.index(new)
+            ids[i], ids[j] = ids[j], ids[i]
+        else:
+            ids.remove(new)
+            ids.insert(ids.index(old), new)
+            checked.discard(old)
+            checked.add(new)
+        self._store_actions(category, ids, checked)
+        self._load_action_list()
+
+    def _remove_action(self, old: str) -> None:
+        category, _actions = self._current_actions()
+        ids, checked = self._list_state()
+        checked.discard(old)
+        self._store_actions(category, ids, checked)
+        self._load_action_list()
 
     def _check_all(self, checked: bool) -> None:
         self.action_list.blockSignals(True)
@@ -757,7 +817,6 @@ class SettingsWindow(QDialog):
             row_layout = QHBoxLayout(controls)
             row_layout.setContentsMargins(0, 0, 0, 0)
             toggle = Toggle(bool(rule.get("enabled", True)))
-            toggle.setToolTip("Watch this folder")
             toggle.toggled.connect(lambda on, i=index: self._edit_rule(i, enabled=on))
             remove = QPushButton("Remove")
             remove.clicked.connect(lambda _c=False, i=index: self._edit_rule(i, remove=True))
@@ -869,12 +928,10 @@ class SettingsWindow(QDialog):
         path = ff.ffmpeg_path()
         if path:
             self.ff_label.setText("Ready")
-            self.ff_label.setToolTip(str(path))
             self.ff_status.setObjectName("dotOk")
             self.ff_button.hide()
         else:
             self.ff_label.setText("Downloads automatically the first time you need it (100–200 MB)")
-            self.ff_label.setToolTip(f"Saved to {BIN_DIR}")
             self.ff_status.setObjectName("dotWarn")
             self.ff_button.setVisible(winutil.IS_WINDOWS)
         # Re-apply the stylesheet for the new object name.

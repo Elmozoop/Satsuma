@@ -6,7 +6,7 @@ import tempfile
 from functools import partial
 from pathlib import Path
 
-from PySide6.QtCore import QPointF, QSize, Qt, QTimer
+from PySide6.QtCore import QPoint, QPointF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QLinearGradient, QPainter, QPainterPath
 from PySide6.QtWidgets import QSizePolicy, QWidget
 
@@ -30,8 +30,12 @@ def _release(listener, folder: Path, *_args) -> None:
 
 
 class RadialPreview(QWidget):
+    wedge_clicked = Signal(object, QPoint)    # (Wedge, global position) when `editable`
+
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.editable = False
+        self.held = None                       # a wedge kept lit while its menu is open
         self.setMouseTracking(True)
         self.setMinimumSize(300, 300)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
@@ -113,23 +117,38 @@ class RadialPreview(QWidget):
             self.clock.stop()
 
     def mouseMoveEvent(self, event) -> None:
+        if self.held is not None:
+            return
         self._user_hover = True
         c = QPointF(self.width() / 2, self.height() / 2)
         target = self.view.hit(self._to_view(event.position()), c)
         self.view.set_hover(target)
-        self.setCursor(Qt.PointingHandCursor if isinstance(target, Wedge) or target == "hub" else Qt.ArrowCursor)
+        self.setCursor(Qt.PointingHandCursor if (isinstance(target, Wedge) and self.editable) or target == "hub"
+                       else Qt.ArrowCursor)
         self.clock.start()
 
     def leaveEvent(self, _event) -> None:
+        if self.held is not None:
+            return
         self._user_hover = False
         self.view.set_hover(None)
         self.clock.start()
 
     def mouseReleaseEvent(self, event) -> None:
         c = QPointF(self.width() / 2, self.height() / 2)
-        if self.view.hit(self._to_view(event.position()), c) == "hub":
+        target = self.view.hit(self._to_view(event.position()), c)
+        if target == "hub":
             self.view.switch_page()
             self.clock.start()
+        elif isinstance(target, Wedge) and self.editable:
+            self.wedge_clicked.emit(target, event.globalPosition().toPoint())
+
+    def hold(self, wedge) -> None:
+        """Keep `wedge` lit (and the demo paused) while its menu is open; None lets go."""
+        self.held = wedge
+        self._user_hover = wedge is not None
+        self.view.set_hover(wedge)
+        self.clock.start()
 
     def paintEvent(self, _event) -> None:
         painter = QPainter(self)

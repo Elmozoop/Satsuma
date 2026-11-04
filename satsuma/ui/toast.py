@@ -277,7 +277,6 @@ class Toasts(QWidget):
             self.update()
         grab = found is None and self._draggable(event.position()) is not None
         self.setCursor(Qt.PointingHandCursor if found else Qt.OpenHandCursor if grab else Qt.ArrowCursor)
-        self.setToolTip("Drag into another app to share or attach it" if grab else "")
 
     def mouseReleaseEvent(self, event) -> None:
         self._drag_from = None

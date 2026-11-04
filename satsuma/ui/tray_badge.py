@@ -82,8 +82,7 @@ class TrayActivity(QObject):
             return
         self._redraw.stop()
         self.tray.setIcon(badge_icon(self.base, None, done=not self._failed, failed=self._failed))
-        self.tray.setToolTip("Satsuma — something went wrong; see the card" if self._failed
-                             else "Satsuma — done")
+
         self._rest.start(DONE_MS)
 
     def _refresh(self) -> None:
@@ -92,9 +91,7 @@ class TrayActivity(QObject):
         self._dirty = False
         fraction = sum(self.jobs.values()) / len(self.jobs)
         self.tray.setIcon(badge_icon(self.base, fraction))
-        count = len(self.jobs)
-        jobs = "1 job" if count == 1 else f"{count} jobs"
-        self.tray.setToolTip(f"Satsuma — {jobs} running · {round(fraction * 100)}%")
+
 
     def _idle(self) -> None:
         self.tray.setIcon(self.base)

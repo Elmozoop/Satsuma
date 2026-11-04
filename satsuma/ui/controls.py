@@ -228,6 +228,11 @@ def stylesheet() -> str:
     QScrollBar::handle:vertical {{ background: {_rgba(QColor(text), 0.22)}; border-radius: 3px; min-height: 30px; }}
     QScrollBar::add-line, QScrollBar::sub-line {{ height: 0; }}
     QScrollBar::add-page, QScrollBar::sub-page {{ background: transparent; }}
+    QMenu {{ background: {card}; border: 1px solid {field_border}; border-radius: 8px; padding: 6px; }}
+    QMenu::item {{ padding: 6px 22px 6px 12px; border-radius: 5px; }}
+    QMenu::item:selected {{ background: {acc_soft}; color: {text}; }}
+    QMenu::item:disabled {{ color: {muted}; font-weight: 600; }}
+    QMenu::separator {{ height: 1px; background: {line}; margin: 5px 8px; }}
     QToolTip {{ background: {card}; color: {text}; border: 1px solid {field_border}; padding: 4px; }}
     """
 
