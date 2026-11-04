@@ -36,17 +36,16 @@ CORNER = 9.0        # wedge corner radius (px at 100 %)
 STAGGER = 0.024     # seconds between wedges appearing
 HUB_SETTLE = 0.35   # resting this long on the centre (where the ring opened) arms the ring swap
 
-# Subtle tints for convert wedges, by what they produce (only when "type_colors" is on).
-# Documents and PDFs stay neutral: a gold PDF wedge stood out too much in a ring of image formats.
-TYPE_TINTS = {ft.IMAGE: QColor(56, 160, 255), ft.VIDEO: QColor(168, 104, 255), ft.AUDIO: QColor(52, 199, 120)}
+# A subtle tint on every convert wedge, by the kind of file being dragged (when "type_colors" is on).
+# The whole Convert ring shares one colour, so no wedge looks greyed out next to the others.
+TYPE_TINTS = {ft.IMAGE: QColor(56, 160, 255), ft.VIDEO: QColor(168, 104, 255), ft.AUDIO: QColor(52, 199, 120),
+              ft.PDF: QColor(255, 108, 92), ft.DOCUMENT: QColor(64, 196, 210)}
+DEFAULT_TINT = TYPE_TINTS[ft.IMAGE]
 
 
-def result_kind(action: Action) -> str | None:
-    """The kind of file a convert action makes ("image", "video", ...), from its label."""
-    if action.group != "convert" or not action.label.isalnum():
-        return None
-    kind = ft.category_of(Path(f"x.{action.label.lower()}"))
-    return kind if kind in TYPE_TINTS else None
+def ring_tint(paths) -> QColor:
+    """The Convert ring's colour for these files."""
+    return TYPE_TINTS.get(ft.category_for(paths), DEFAULT_TINT) if paths else DEFAULT_TINT
 
 
 @dataclass
@@ -483,14 +482,13 @@ class RadialView:
         else:
             painter.setPen(QPen(QColor(255, 255, 255, 26) if dark else QColor(0, 0, 0, 18), 1.0))
             fill = QColor(255, 255, 255, 24) if dark else QColor(255, 255, 255, 175)
-            kind = result_kind(wedge.action) if settings.get("type_colors") else None
-            if kind:
-                tint = QColor(TYPE_TINTS[kind])
+            if settings.get("type_colors") and wedge.action.group == "convert":
+                colour = ring_tint(self.paths)
+                tint = QColor(colour)
                 tint.setAlpha(46 if dark else 38)
                 painter.setBrush(fill)
                 painter.drawPath(path)
-                painter.setPen(QPen(QColor(TYPE_TINTS[kind].red(), TYPE_TINTS[kind].green(),
-                                           TYPE_TINTS[kind].blue(), 90), 1.0))
+                painter.setPen(QPen(QColor(colour.red(), colour.green(), colour.blue(), 90), 1.0))
                 fill = tint
             painter.setBrush(fill)
             fg = pal.text

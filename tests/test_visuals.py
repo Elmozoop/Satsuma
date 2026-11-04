@@ -28,12 +28,23 @@ def test_size_change_wording():
 
 
 def test_wedge_tints_follow_what_an_action_makes(workdir):
-    from satsuma.ui.radial import result_kind
+    """Every convert wedge in a ring shares one tint (none looks greyed out); tools stay neutral."""
+    from satsuma.ui.radial import RadialView, ring_tint
+    from satsuma.ui.theme import palette
 
-    by_id = {a.id: a for a in actions.actions_for([workdir / "photo.jpg"], customise=False)}
-    assert result_kind(by_id["img-png"]) == "image"
-    assert result_kind(by_id["img-pdf"]) is None                   # documents stay neutral (no yellow)
-    assert result_kind(by_id["img-compress"]) is None               # tools stay neutral
+    assert ring_tint([workdir / "photo.jpg"]) != ring_tint([workdir / "clip.mp4"])
+    view = RadialView()
+    view.set_paths([workdir / "photo.jpg"], animate=False)
+    pal = palette()
+
+    def centre_colour(action_id):
+        wedge = next(w for w in view.wedges if w.action.id == action_id)
+        count = len(view.page_wedges(wedge.page))
+        image = view._wedge_sprite(wedge, count, False, pal, True, 1.0, label=False)[0].toImage()
+        return image.pixelColor(image.rect().center())
+
+    assert centre_colour("img-pdf") == centre_colour("img-png") == centre_colour("img-webp")
+    assert centre_colour("img-compress") != centre_colour("img-png")
 
 
 def test_thumbnails(qapp, workdir, tmp_path):

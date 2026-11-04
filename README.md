@@ -102,7 +102,7 @@ Right-click the tray icon → **Settings…** It follows your theme and accent c
 
 - **Appearance** — with a live preview you can hover and click: theme (Windows / light / dark),
   accent colour, how see-through the ring is, size, wedges per ring, which ring opens first,
-  animation speed and bounce, what the centre shows, icons, colour-coding wedges by file type,
+  animation speed and bounce, what the centre shows, icons, a colour for the Convert ring by file type,
   and the explanation bubbles.
 - **Ring actions** — for each kind of file, tick what appears in the ring and drag to reorder,
   with a live preview of that ring.
