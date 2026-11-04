@@ -186,7 +186,9 @@ def set_sendto(enabled: bool) -> bool:
     icon = Path(program)
     from .config import ASSETS_DIR
 
-    if (ASSETS_DIR / "icon.ico").exists():
+    # The exe carries the icon itself; its bundled assets live in a temporary folder that goes
+    # away when it closes, so a shortcut must never point there.
+    if not getattr(sys, "frozen", False) and (ASSETS_DIR / "icon.ico").exists():
         icon = ASSETS_DIR / "icon.ico"
     # Values travel as environment variables: no quoting problems with odd paths.
     script = (

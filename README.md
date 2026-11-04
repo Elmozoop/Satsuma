@@ -9,7 +9,20 @@ without opening a single app. Everything runs **locally on your PC** — files a
 
 ---
 
-## Start it
+## Download
+
+1. Go to **[Releases](https://github.com/Elmozoop/Satsuma/releases/latest)** and download **`Satsuma.exe`**.
+2. Double-click it. That's all: no installer, no Python. Satsuma appears in the system tray (the 🍊 by
+   the clock); hold **Shift** while dragging a file to open the ring.
+3. Want it every time you sign in? Right-click the 🍊 → **Settings… → Trigger → Start when I sign in**.
+
+Put `Satsuma.exe` anywhere you like (Documents, a Tools folder…). Your settings live in
+`%LOCALAPPDATA%\Satsuma`, so moving or updating the exe keeps them.
+
+> **Windows SmartScreen** may say it "protected your PC" the first time, because Satsuma.exe isn't
+> signed with a paid certificate. Click **More info → Run anyway**.
+
+## Run from source
 
 1. Install **Python 3.10 or newer** from [python.org](https://www.python.org/downloads/)
    (tick **“Add python.exe to PATH”**).
@@ -17,8 +30,6 @@ without opening a single app. Everything runs **locally on your PC** — files a
    The first run sets things up (a minute or two); after that it starts instantly. When an update
    needs new packages, `run.bat` installs them by itself.
 3. Satsuma lives in the system tray (the 🍊 by the clock).
-
-Prefer a standalone `.exe`? See [Build an .exe](#build-an-exe).
 
 ## Use it
 
@@ -121,8 +132,9 @@ Right-click the tray icon → **Settings…** It follows your theme and accent c
 
 ## Build an .exe
 
-**On your PC:** double-click **`build.bat`** → `dist\Satsuma\Satsuma.exe`
-(keep the whole `Satsuma` folder together).
+**On your PC:** double-click **`build.bat`** → `dist\Satsuma.exe`, a single file you can share.
+The build then runs `Satsuma.exe --self-test`, which exercises every engine inside the exe (images,
+HEIC/AVIF, PDF rendering and passwords, text recognition, archives…) and stops if anything is missing.
 
 **On GitHub (no setup):** put the workflow in `.github/workflows/build.yml` and push. It runs the
 tests on Windows, builds the exe, starts it to check it works, and attaches

@@ -148,3 +148,12 @@ def test_new_tools_appear_and_rings_still_fit(workdir, tmp_path):
     assert "any-rename" not in {a.id for a in actions.actions_for([workdir / "photo.jpg"])}   # needs 2+
     both = [workdir / "photo.jpg", workdir / "alpha.png"]
     assert "any-rename" in {a.id for a in actions.actions_for(both)}
+
+
+def test_self_test_passes_from_source(qapp, tmp_path):
+    """The same checks the built exe runs with --self-test."""
+    from satsuma.selftest import run
+
+    report = tmp_path / "selftest.txt"
+    assert run(report) == 0, report.read_text(encoding="utf-8")
+    assert '"failed": 0' in report.read_text(encoding="utf-8")

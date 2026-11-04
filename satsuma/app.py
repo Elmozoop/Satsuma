@@ -386,6 +386,13 @@ class Satsuma(QObject):
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv if argv is None else argv)
     args = argv[1:]
+    if "--self-test" in args:
+        # The exe has no console, so the report goes to a file (default: beside the log).
+        from .config import DATA_DIR
+        from .selftest import run
+
+        target = next((a.split("=", 1)[1] for a in args if a.startswith("--report=")), None)
+        return run(Path(target) if target else DATA_DIR / "selftest.txt")
     background = "--background" in args
     want_settings = "--settings" in args
     files = [a for a in args if not a.startswith("--")]
