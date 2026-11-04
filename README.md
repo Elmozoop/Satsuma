@@ -11,7 +11,9 @@ without opening a single app. Everything runs **locally on your PC** — files a
 
 ## Download
 
-1. Go to **[Releases](https://github.com/Elmozoop/Satsuma/releases/latest)** and download **`Satsuma.exe`**.
+1. **[Download Satsuma.exe](https://github.com/Elmozoop/Satsuma/releases/latest/download/Satsuma.exe)**
+   (always the newest version). You only need this one file; the *Source code* files on the
+   [Releases](https://github.com/Elmozoop/Satsuma/releases/latest) page are for developers.
 2. Double-click it. That's all: no installer, no Python. A one-minute **tour** opens the first time,
    with a practice ring to try it on. Afterwards Satsuma waits in the system tray (the 🍊 by the clock);
    hold **Shift** while dragging a file to open the ring.
