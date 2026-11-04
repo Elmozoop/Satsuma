@@ -49,6 +49,7 @@ Prefer a standalone `.exe`? See [Build an .exe](#build-an-exe).
 - **Convert clipboard** — copied files, or a copied picture (saved to `Pictures\Satsuma clipboard`).
 - **Recent** — your last 10 results; click one to see it in its folder.
 - **Undo** — the last conversion, even after its card has gone.
+- **Info panel beside wedges** — tick or untick to turn the info panel on or off.
 
 Your original file is **never changed, moved or deleted** (the one exception is **Rename**, which
 renames the files you chose; its Undo puts the old names back). Results are saved next to it

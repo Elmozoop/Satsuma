@@ -147,6 +147,10 @@ class Satsuma(QObject):
         self.enabled_action.setChecked(bool(settings.get("enabled")))
         self.enabled_action.toggled.connect(lambda v: settings.set("enabled", v))
         menu.addAction(self.enabled_action)
+        self.info_action = QAction("Info panel beside wedges", menu, checkable=True)
+        self.info_action.setChecked(bool(settings.get("explain_actions")))
+        self.info_action.toggled.connect(lambda v: settings.set("explain_actions", v))
+        menu.addAction(self.info_action)
         menu.addAction("Open drop window", self.menu.open_pinned)
         self.clipboard_action = QAction("Convert clipboard", menu)
         self.clipboard_action.triggered.connect(self.convert_clipboard)
@@ -173,6 +177,7 @@ class Satsuma(QObject):
 
     def _tray_menu_opening(self) -> None:
         self.enabled_action.setChecked(bool(settings.get("enabled")))
+        self.info_action.setChecked(bool(settings.get("explain_actions")))   # may have changed in Settings
         targets = [p for p in undo_targets(self._last_outputs) if p.exists()]
         self.undo_action.setEnabled(bool(targets))
         if len(targets) == 1:

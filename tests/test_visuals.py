@@ -285,3 +285,22 @@ def test_rename_panel_doesnt_promise_the_original_is_unchanged():
     from satsuma.explain import explain
 
     assert "old names back" in explain(RENAME)[2] and "isn't changed" not in explain(RENAME)[2]
+
+
+def test_tray_menu_switches_the_info_panel(qapp, monkeypatch):
+    import satsuma.app as app_module
+
+    monkeypatch.setattr(app_module, "setup_logging", lambda: None)
+    satsuma = app_module.Satsuma(qapp)
+    try:
+        assert satsuma.info_action.isChecked()
+        satsuma.info_action.setChecked(False)
+        assert settings.get("explain_actions") is False
+        settings.set("explain_actions", True)            # switched back on in Settings…
+        satsuma._tray_menu_opening()
+        assert satsuma.info_action.isChecked()            # …and the tray menu shows it
+    finally:
+        settings.set("explain_actions", True)
+        satsuma.detector.stop()
+        satsuma.watcher.stop()
+        satsuma.tray.hide()
