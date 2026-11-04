@@ -26,7 +26,8 @@ from .preview import SAMPLES, RadialPreview
 from .theme import ACCENT_PRESETS, palette, readable_on
 
 LOOK_KEYS = ["theme", "accent", "menu_scale", "glass_opacity", "anim_speed", "bounce", "show_icons",
-             "show_captions", "hub_info", "wedges_per_ring", "hub_switch_ms", "start_page", "type_colors"]
+             "show_captions", "hub_info", "wedges_per_ring", "hub_switch_ms", "start_page", "type_colors",
+             "explain_actions"]
 PROJECT_URL = "https://github.com/Elmozoop/Satsuma"
 PAGES = ["Appearance", "Ring actions", "Trigger", "Saving", "Watched folders", "Converters", "About"]
 WATCH_PAGE = PAGES.index("Watched folders")
@@ -399,6 +400,8 @@ class SettingsWindow(QDialog):
         centre.add("Shows", "", _segmented((("size", "Size"), ("name", "Name"), ("type", "Type")),
                                            "hub_info"))
         centre.add("Describe the action under the cursor", "", _toggle("show_captions"))
+        centre.add("Explain actions in a bubble", "A short note beside the wedge: what it does, where the file goes",
+                   _toggle("explain_actions"))
 
         reset = QPushButton("Reset appearance")
         reset.clicked.connect(self._reset_look)
