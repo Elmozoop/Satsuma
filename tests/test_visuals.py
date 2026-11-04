@@ -35,6 +35,7 @@ def test_convert_wedges_share_one_tint(qapp, workdir):
     from satsuma.ui.theme import palette
 
     assert ring_tint([workdir / "photo.jpg"]) != ring_tint([workdir / "clip.mp4"])
+    assert ring_tint([workdir / "report.pdf"]) is None and ring_tint([workdir / "notes.docx"]) is None   # plain
     view = RadialView()
     view.set_paths([workdir / "photo.jpg"], animate=False)
     pal = palette()

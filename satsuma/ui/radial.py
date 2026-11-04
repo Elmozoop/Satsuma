@@ -38,14 +38,13 @@ HUB_SETTLE = 0.35   # resting this long on the centre (where the ring opened) ar
 
 # A subtle tint on every convert wedge, by the kind of file being dragged (when "type_colors" is on).
 # The whole Convert ring shares one colour, so no wedge looks greyed out next to the others.
-TYPE_TINTS = {ft.IMAGE: QColor(56, 160, 255), ft.VIDEO: QColor(168, 104, 255), ft.AUDIO: QColor(52, 199, 120),
-              ft.PDF: QColor(255, 108, 92), ft.DOCUMENT: QColor(64, 196, 210)}
-DEFAULT_TINT = TYPE_TINTS[ft.IMAGE]
+# PDFs, documents and everything else stay plain: no tint at all.
+TYPE_TINTS = {ft.IMAGE: QColor(56, 160, 255), ft.VIDEO: QColor(168, 104, 255), ft.AUDIO: QColor(52, 199, 120)}
 
 
-def ring_tint(paths) -> QColor:
-    """The Convert ring's colour for these files."""
-    return TYPE_TINTS.get(ft.category_for(paths), DEFAULT_TINT) if paths else DEFAULT_TINT
+def ring_tint(paths) -> QColor | None:
+    """The Convert ring's colour for these files, or None for a plain ring."""
+    return TYPE_TINTS.get(ft.category_for(paths)) if paths else None
 
 
 @dataclass
@@ -482,8 +481,8 @@ class RadialView:
         else:
             painter.setPen(QPen(QColor(255, 255, 255, 26) if dark else QColor(0, 0, 0, 18), 1.0))
             fill = QColor(255, 255, 255, 24) if dark else QColor(255, 255, 255, 175)
-            if settings.get("type_colors") and wedge.action.group == "convert":
-                colour = ring_tint(self.paths)
+            colour = ring_tint(self.paths) if settings.get("type_colors") else None
+            if colour is not None and wedge.action.group == "convert":
                 tint = QColor(colour)
                 tint.setAlpha(46 if dark else 38)
                 painter.setBrush(fill)

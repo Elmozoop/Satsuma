@@ -385,7 +385,7 @@ class SettingsWindow(QDialog):
         shape.add("First ring", "Which ring opens first",
                   _segmented((("convert", "Convert"), ("tools", "Tools")), "start_page"))
         shape.add("Icons on tool wedges", "", _toggle("show_icons"))
-        shape.add("Colour by file type", "The Convert ring takes a colour from the file: photos blue, videos purple…",
+        shape.add("Colour by file type", "A light tint on the Convert ring: photos blue, videos purple, audio green",
                   _toggle("type_colors"))
 
         motion = self._section(layout, "Motion")
