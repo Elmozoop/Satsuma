@@ -21,11 +21,12 @@ from ..engine import documents
 from ..engine import ffmpeg_tool as ff
 from ..engine.paths import open_file
 from .controls import Segmented, Toggle, confirm, pick_colour, stylesheet
+from .glass import glass_window
 from .icons import draw_icon
 from .preview import SAMPLES, RadialPreview
 from .theme import ACCENT_PRESETS, palette, readable_on
 
-LOOK_KEYS = ["theme", "accent", "menu_scale", "glass_opacity", "anim_speed", "bounce", "show_icons",
+LOOK_KEYS = ["style", "theme", "accent", "menu_scale", "glass_opacity", "anim_speed", "bounce", "show_icons",
              "show_captions", "hub_info", "wedges_per_ring", "hub_switch_ms", "start_page", "type_colors",
              "explain_actions"]
 PROJECT_URL = "https://github.com/Elmozoop/Satsuma"
@@ -232,11 +233,17 @@ class _ActionDelegate(QStyledItemDelegate):
 
 # ----------------------------------------------------------------------------- the window
 class SettingsWindow(QDialog):
+    # Solid ↔ Glass changes how the window itself is made, so the app reopens it in the new style.
+    restyle_requested = Signal()
+    tour_requested = Signal()
+
     def __init__(self):
         super().__init__(None)
         self.setWindowTitle("Satsuma Settings")
         self.setWindowFlags(Qt.Dialog | Qt.WindowCloseButtonHint | Qt.WindowMinimizeButtonHint
                             | Qt.WindowMaximizeButtonHint)
+        glass_window(self)
+        self._made_as = settings.get("style")
         self.resize(1080, 700)
         self.setMinimumSize(900, 560)
         self._fetcher: _FFmpegFetcher | None = None
@@ -291,6 +298,13 @@ class SettingsWindow(QDialog):
             self.nav.item(row).setIcon(QIcon(pixmap))
 
     def _on_setting(self, key: str) -> None:
+        if key in ("style", "*") and settings.get("style") != self._made_as:
+            self.restyle_requested.emit()
+            return
+        if key in RESTYLE_KEYS and self.isVisible() and settings.get("style") == "glass":
+            from .glass import apply_backdrop
+
+            apply_backdrop(self)               # light/dark title bar to match
         if key in RESTYLE_KEYS:
             self.setStyleSheet(stylesheet())
             self._paint_nav_icons()
@@ -370,10 +384,12 @@ class SettingsWindow(QDialog):
 
         scroll, layout = self._page("Appearance", "Changes show in the preview straight away.")
         colour = self._section(layout, "Colour")
+        colour.add("Style", "Glass: frosted, see-through surfaces everywhere. Solid: plain ones.",
+                   _segmented((("glass", "Glass"), ("solid", "Solid")), "style"))
         colour.add("Theme", "", _segmented((("system", "System"), ("light", "Light"), ("dark", "Dark")),
                                             "theme"))
         colour.add("Accent", "", self._accent_picker())
-        colour.add("Glass", "How solid the ring is", _slider("glass_opacity", 35, 100, 0.01, "%"))
+        colour.add("Opacity", "How solid the ring is in the Solid style", _slider("glass_opacity", 35, 100, 0.01, "%"))
 
         shape = self._section(layout, "Shape")
         shape.add("Size", "", _slider("menu_scale", 70, 150, 0.01, "%", live=False))
@@ -617,6 +633,7 @@ class SettingsWindow(QDialog):
         offered = [a for a in actions_for(self.actions_preview.view.paths, customise=False)
                    if a.group == wedge.action.group and a.id != wedge.action.id and a.id in ids]
         menu = QMenu(self)
+        glass_window(menu, menu=True)
         heading = menu.addAction(f"Replace “{wedge.action.label}” with")
         heading.setEnabled(False)
         for action in offered:
@@ -973,6 +990,9 @@ class SettingsWindow(QDialog):
         data = QPushButton("Open folder")
         data.clicked.connect(lambda: open_file(DATA_DIR))
         about.add("Data folder", str(DATA_DIR), data)
+        tour = QPushButton("Show the tour")
+        tour.clicked.connect(self.tour_requested.emit)
+        about.add("New here?", "A one-minute guided tour, with a practice ring", tour)
 
         danger = self._section(layout, "Reset")
         reset = QPushButton("Reset everything")

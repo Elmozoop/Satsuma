@@ -69,6 +69,24 @@ def run(report: Path | None = None) -> int:
 
     check("bundled assets", lambda: _need((ASSETS_DIR / "icon.png").exists(), str(ASSETS_DIR)))
 
+    def glass_blur() -> str:
+        from PySide6.QtGui import QImage
+
+        from .ui.glass import blur_image
+
+        return _need(not blur_image(QImage(120, 80, QImage.Format_RGB32)).isNull())
+
+    def tour() -> str:
+        from .ui.tutorial import Tutorial
+
+        window = Tutorial()
+        pages = window.stack.count()
+        window.deleteLater()
+        return _need(pages == 8, f"{pages} pages")
+
+    check("glass blur", glass_blur)
+    check("tour builds", tour)
+
     lines = [f"{'PASS' if ok else 'FAIL'}  {name}: {detail.splitlines()[0] if ok else detail}"
              for name, ok, detail in results]
     text = "\n".join(lines)

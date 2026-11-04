@@ -139,15 +139,33 @@ def stylesheet() -> str:
     pal = palette()
     dark = is_dark()
     accent, on_accent = pal.accent, pal.on_accent
-    if dark:
+    from .glass import IS_WINDOWS, is_glass
+
+    if is_glass() and IS_WINDOWS:
+        # Frosted: Windows' acrylic shows through; panes are lighter or darker layers of glass.
+        if dark:
+            window, sidebar = "rgba(18,19,24,0.38)", "rgba(0,0,0,0.22)"
+            card, field = "rgba(255,255,255,0.07)", "rgba(255,255,255,0.09)"
+            text, muted, line = "#f4f4f6", "#b4b6c0", "rgba(255,255,255,0.12)"
+            hover, field_border = "rgba(255,255,255,0.09)", "rgba(255,255,255,0.16)"
+        else:
+            window, sidebar = "rgba(250,250,252,0.42)", "rgba(255,255,255,0.30)"
+            card, field = "rgba(255,255,255,0.55)", "rgba(255,255,255,0.70)"
+            text, muted, line = "#141418", "#55575f", "rgba(0,0,0,0.09)"
+            hover, field_border = "rgba(0,0,0,0.05)", "rgba(0,0,0,0.13)"
+    elif dark:
         window, sidebar, card, field = "#1b1c20", "#16171a", "#25262b", "#2e2f35"
         text, muted, line = "#f2f2f4", "#9a9ca6", "rgba(255,255,255,0.08)"
         hover, field_border = "rgba(255,255,255,0.06)", "rgba(255,255,255,0.10)"
     else:
         window, sidebar, card, field = "#f4f4f6", "#ebebee", "#ffffff", "#ffffff"
         text, muted, line = "#18181c", "#686a74", "rgba(0,0,0,0.08)"
-        hover, field_border = "rgba(0,0,0,0.05)", "rgba(0,0,0,0.14)"
+        hover, field_border = "rgba(0,0,0,0.05)", "rgba(0,0,0,0.13)"
     acc, acc_soft = accent.name(), _rgba(accent, 0.18)
+    # Drop-down lists and tooltips are separate small windows with nothing frosted behind them.
+    popup = "#26272c" if dark else "#ffffff"
+    menu_bg = (("rgba(32,33,38,0.55)" if dark else "rgba(252,252,254,0.6)") if is_glass() and IS_WINDOWS
+               else popup)
     return f"""
     QDialog {{ background: {window}; }}
     QWidget {{ color: {text}; font-family: "Segoe UI Variable Text", "Segoe UI"; font-size: 10pt; }}
@@ -156,6 +174,7 @@ def stylesheet() -> str:
     QLabel#cardTitle {{ font-size: 10.5pt; font-weight: 600; padding: 10px 2px 2px 2px; }}
     QLabel#rowTitle {{ font-size: 10pt; }}
     QLabel#rowHint, QLabel#hint {{ color: {muted}; font-size: 9pt; }}
+    QLabel#tourBody {{ color: {text}; font-size: 10.5pt; }}
     QLabel#value {{ color: {muted}; }}
     QLabel#example {{ color: {muted}; font-family: "Cascadia Mono", Consolas, monospace; font-size: 9pt; }}
     QLabel#promptTitle {{ font-size: 15pt; font-weight: 600; }}
@@ -203,7 +222,7 @@ def stylesheet() -> str:
     QLineEdit:disabled {{ color: {muted}; }}
     QComboBox::drop-down {{ border: none; width: 26px; }}
     QComboBox::down-arrow {{ image: url("{_chevron(muted)}"); width: 10px; height: 10px; }}
-    QComboBox QAbstractItemView {{ background: {card}; border: 1px solid {field_border};
+    QComboBox QAbstractItemView {{ background: {popup}; border: 1px solid {field_border};
                                    selection-background-color: {acc_soft}; selection-color: {text};
                                    outline: none; padding: 4px; }}
 
@@ -228,12 +247,12 @@ def stylesheet() -> str:
     QScrollBar::handle:vertical {{ background: {_rgba(QColor(text), 0.22)}; border-radius: 3px; min-height: 30px; }}
     QScrollBar::add-line, QScrollBar::sub-line {{ height: 0; }}
     QScrollBar::add-page, QScrollBar::sub-page {{ background: transparent; }}
-    QMenu {{ background: {card}; border: 1px solid {field_border}; border-radius: 8px; padding: 6px; }}
+    QMenu {{ background: {menu_bg}; border: 1px solid {field_border}; border-radius: 8px; padding: 6px; }}
     QMenu::item {{ padding: 6px 22px 6px 12px; border-radius: 5px; }}
     QMenu::item:selected {{ background: {acc_soft}; color: {text}; }}
     QMenu::item:disabled {{ color: {muted}; font-weight: 600; }}
     QMenu::separator {{ height: 1px; background: {line}; margin: 5px 8px; }}
-    QToolTip {{ background: {card}; color: {text}; border: 1px solid {field_border}; padding: 4px; }}
+    QToolTip {{ background: {popup}; color: {text}; border: 1px solid {field_border}; padding: 4px; }}
     """
 
 
@@ -244,6 +263,9 @@ def _dialog(parent, title: str, text: str, buttons: list[tuple[str, str, bool]])
     from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QVBoxLayout
 
     dialog = QDialog(parent)
+    from .glass import glass_window
+
+    glass_window(dialog)
     dialog.setWindowTitle(title)
     dialog.setWindowFlags(Qt.Dialog | Qt.WindowStaysOnTopHint | Qt.WindowCloseButtonHint)
     dialog.setMinimumWidth(380)
@@ -287,6 +309,9 @@ def pick_colour(parent, current: QColor, title: str) -> QColor:
     from PySide6.QtWidgets import QColorDialog
 
     dialog = QColorDialog(current, parent)
+    from .glass import glass_window
+
+    glass_window(dialog)
     dialog.setWindowTitle(title)
     dialog.setOption(QColorDialog.DontUseNativeDialog, True)
     dialog.setStyleSheet(stylesheet())

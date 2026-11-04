@@ -18,6 +18,7 @@ from PySide6.QtGui import (QBrush, QColor, QFont, QFontMetricsF, QPainter, QPain
                            QPainterPathStroker, QPen, QPixmap, QRadialGradient)
 
 from . import thumbs
+from .glass import is_glass, tint
 
 from .. import filetypes as ft
 from ..actions import Action, actions_for
@@ -119,6 +120,7 @@ class RadialView:
         self.confirm = Spring(0.0, "main")      # 0 → 1 as the finish tick plays on `chosen`
         self.thumb_fade = Spring(0.0, "main")
         self.glow = Spring(0.0, "hover")         # 0 → 1 while files are dragged over the ring
+        self.backdrop: QPixmap | None = None     # Glass: the blurred screen behind the window
         self._glow_clock = 0.0                   # drives the neon's gentle pulse
         self._thumb = None                       # None, "pending", "none" or a QPixmap
         self.empty_text = "Drop files here"
@@ -370,7 +372,7 @@ class RadialView:
     # -- sprites -------------------------------------------------------------
     def _check_style(self, pal, dpr: float) -> None:
         key = (round(self.scale, 3), pal.panel.rgba(), pal.text.rgba(), pal.accent.rgba(),
-               bool(settings.get("show_icons")), bool(settings.get("type_colors")), round(dpr, 2))
+               bool(settings.get("show_icons")), bool(settings.get("type_colors")), is_glass(), round(dpr, 2))
         if key != self._style_key:
             self._style_key = key
             self._sprites.clear()
@@ -404,6 +406,12 @@ class RadialView:
         bounds = QRectF(-plate_r, -plate_r, 2 * plate_r, 2 * plate_r).adjusted(-2, -2, 2, 2)
         pixmap, painter = self._canvas(bounds, dpr)
 
+        if is_glass():
+            self._glass_plate(painter, pal, dark, plate_r, hub_r)
+            painter.end()
+            sprite = self._sprites["plate"] = (pixmap, bounds.topLeft())
+            return sprite
+
         # Glassy disc with a warm accent tint and a top highlight
         plate = QRadialGradient(QPointF(0, -plate_r * 0.55), plate_r * 1.6)
         top = QColor(pal.panel).lighter(118 if dark else 103)
@@ -425,6 +433,38 @@ class RadialView:
         painter.end()
         sprite = self._sprites["plate"] = (pixmap, bounds.topLeft())
         return sprite
+
+    @staticmethod
+    def _glass_plate(painter: QPainter, pal, dark: bool, plate_r: float, hub_r: float) -> None:
+        """Frosted disc: a light tint over the blurred backdrop, a soft top sheen, a bright rim."""
+        layer = tint(pal.panel, dark)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(layer)
+        painter.drawEllipse(QPointF(0, 0), plate_r, plate_r)
+        sheen = QRadialGradient(QPointF(0, -plate_r * 0.85), plate_r * 1.25)
+        sheen.setColorAt(0.0, QColor(255, 255, 255, 46 if dark else 90))
+        sheen.setColorAt(1.0, QColor(255, 255, 255, 0))
+        painter.setBrush(QBrush(sheen))
+        painter.drawEllipse(QPointF(0, 0), plate_r, plate_r)
+        painter.setBrush(Qt.NoBrush)
+        painter.setPen(QPen(QColor(255, 255, 255, 70 if dark else 200), 1.3))
+        painter.drawEllipse(QPointF(0, 0), plate_r - 0.7, plate_r - 0.7)
+        painter.setPen(QPen(QColor(0, 0, 0, 60 if dark else 30), 1.0))
+        painter.drawEllipse(QPointF(0, 0), plate_r + 0.6, plate_r + 0.6)
+        hub = QColor(255, 255, 255, 16 if dark else 120)
+        painter.setPen(QPen(QColor(255, 255, 255, 55 if dark else 170), 1.0))
+        painter.setBrush(hub)
+        painter.drawEllipse(QPointF(0, 0), hub_r, hub_r)
+
+    def _paint_backdrop(self, painter: QPainter, center: QPointF, plate_r: float, grow: float) -> None:
+        """Glass: the blurred screen, showing through the disc only (never through the shadow)."""
+        clip = QPainterPath()
+        clip.addEllipse(QPointF(0, 0), plate_r, plate_r)
+        painter.save()
+        painter.setClipPath(clip)
+        painter.scale(1 / grow, 1 / grow)            # the backdrop is the real screen: never scaled
+        painter.drawPixmap(QPointF(-center.x(), -center.y()), self.backdrop)
+        painter.restore()
 
     def _shadow_sprite(self, dark: bool, dpr: float):
         """Soft drop shadow in its own sprite (full resolution: a 1:1 blit is the cheapest draw)."""
@@ -481,6 +521,9 @@ class RadialView:
         else:
             painter.setPen(QPen(QColor(255, 255, 255, 26) if dark else QColor(0, 0, 0, 18), 1.0))
             fill = QColor(255, 255, 255, 24) if dark else QColor(255, 255, 255, 175)
+            if is_glass():                       # glass tiles: lighter panes with a bright edge
+                painter.setPen(QPen(QColor(255, 255, 255, 48 if dark else 190), 1.0))
+                fill = QColor(255, 255, 255, 20 if dark else 105)
             colour = ring_tint(self.paths) if settings.get("type_colors") else None
             if colour is not None and wedge.action.group == "convert":
                 tint = QColor(colour)
@@ -543,6 +586,8 @@ class RadialView:
         painter.restore()
         if self.glow.value > 0.01:
             self._paint_glow(painter, pal, r_out)
+        if is_glass() and self.backdrop is not None:
+            self._paint_backdrop(painter, center, r_out + PLATE_PAD * self.scale, grow)
         pixmap, origin = self._plate_sprite(pal, dark, dpr)
         painter.drawPixmap(origin, pixmap)
 

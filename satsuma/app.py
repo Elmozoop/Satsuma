@@ -27,7 +27,8 @@ from .jobs import JobRunner
 from .ui import prompts
 from .ui.menu import ActionMenu
 from .ui.settings_window import SettingsWindow
-from .ui.controls import message
+from .ui.controls import message, stylesheet
+from .ui.glass import glass_window
 from .ui.toast import Toasts
 from .ui.tray_badge import TrayActivity
 from .watcher import FolderWatcher
@@ -99,6 +100,7 @@ class Satsuma(QObject):
         self.watcher = FolderWatcher(self.runner, self)
         self.detector = DragDetector(self)
         self.settings_window: SettingsWindow | None = None
+        self.tutorial_window = None
         self._last_outputs: list[Path] = []   # for "Undo" in the tray menu
         self._titles: dict[int, str] = {}      # job id -> title, for Recent
         self.server: QLocalServer | None = None
@@ -139,6 +141,8 @@ class Satsuma(QObject):
         self.tray.setToolTip(self._idle_tooltip())
         self.activity = TrayActivity(self.tray, app_icon(), self._idle_tooltip, self.runner.signals, self)
         menu = QMenu()
+        glass_window(menu, menu=True, always=True)
+        menu.setStyleSheet(stylesheet())
         header = QAction(f"Satsuma {VERSION}", menu)
         header.setEnabled(False)
         menu.addAction(header)
@@ -162,6 +166,7 @@ class Satsuma(QObject):
         menu.addAction(self.undo_action)
         menu.addSeparator()
         menu.addAction("Settings…", self.show_settings)
+        menu.addAction("Tour…", self.show_tutorial)
         menu.addSeparator()
         menu.addAction("Open log", lambda: open_file(LOG_FILE))
         menu.addAction("Quit", self.quit)
@@ -176,6 +181,7 @@ class Satsuma(QObject):
         return "Satsuma"   # just the name: Windows shows one on hover, and nothing else pops up
 
     def _tray_menu_opening(self) -> None:
+        self._tray_menu.setStyleSheet(stylesheet())          # theme, accent and style may have changed
         self.enabled_action.setChecked(bool(settings.get("enabled")))
         self.info_action.setChecked(bool(settings.get("explain_actions")))   # may have changed in Settings
         targets = [p for p in undo_targets(self._last_outputs) if p.exists()]
@@ -347,9 +353,42 @@ class Satsuma(QObject):
         if self.settings_window is None:
             self.settings_window = SettingsWindow()
             self.settings_window.finished.connect(self._settings_closed)
+            self.settings_window.restyle_requested.connect(self._reopen_settings)
+            self.settings_window.tour_requested.connect(self.show_tutorial)
         self.settings_window.show()
         self.settings_window.raise_()
         self.settings_window.activateWindow()
+
+    def show_tutorial(self) -> None:
+        from .ui.tutorial import Tutorial
+
+        if self.tutorial_window is None:
+            self.tutorial_window = Tutorial()
+            self.tutorial_window.open_drop_window.connect(self.menu.open_pinned)
+            self.tutorial_window.finished.connect(self._tutorial_closed)
+        self.tutorial_window.show()
+        self.tutorial_window.raise_()
+        self.tutorial_window.activateWindow()
+
+    def _tutorial_closed(self) -> None:
+        window, self.tutorial_window = self.tutorial_window, None
+        if window is not None:
+            window.deleteLater()
+        self._idle.start()
+
+    def _reopen_settings(self) -> None:
+        """Solid ↔ Glass: make the window again in the new style, on the same page and spot."""
+        old = self.settings_window
+        if old is None or old.busy:
+            return
+        page, where = old.stack.currentIndex(), old.geometry()
+        self.settings_window = None
+        old.finished.disconnect(self._settings_closed)
+        old.hide()
+        old.deleteLater()
+        self.show_settings()
+        self.settings_window.setGeometry(where)
+        self.settings_window.nav.setCurrentRow(page)
 
     def _settings_closed(self) -> None:
         # Settings is opened rarely: free it rather than keep ~10 MB of widgets around.
@@ -365,6 +404,7 @@ class Satsuma(QObject):
         if self.settings_window is not None and not self.settings_window.isVisible():
             self._settings_closed()   # closed mid-download; free it once the download is over
         busy = (self.menu.isVisible() or self.toasts.isVisible() or self.settings_window is not None
+                or self.tutorial_window is not None
                 or self.runner.pool.activeThreadCount() > 0 or QApplication.activePopupWidget())
         if busy:
             self._idle.start()   # try again later
@@ -428,6 +468,8 @@ def main(argv: list[str] | None = None) -> int:
         QTimer.singleShot(0, lambda: satsuma.handle_request(payload))
     elif want_settings:
         QTimer.singleShot(0, satsuma.show_settings)
+    elif not settings.get("tutorial_done"):
+        QTimer.singleShot(500, satsuma.show_tutorial)     # first run: the tour instead of a balloon
     elif not background:
         QTimer.singleShot(400, satsuma.greet)
     app._satsuma = satsuma  # keep a strong reference for the lifetime of the app

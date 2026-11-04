@@ -8,6 +8,7 @@ from PySide6.QtCore import QEasingCurve, QPoint, QPointF, QRect, QRectF, Qt, QVa
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QGuiApplication, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QWidget
 
+from .glass import frosted, is_glass, paint_pane
 from .theme import palette, ui_font
 
 TEXT_W = 250       # widest line of text
@@ -25,6 +26,7 @@ class Bubble(QWidget):
         self.setAttribute(Qt.WA_ShowWithoutActivating, True)
         self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         self.title = self.body = self.footer = ""
+        self.backdrop = None
         self._fade = QVariantAnimation(self)
         self._fade.setDuration(130)
         self._fade.setEasingCurve(QEasingCurve.OutCubic)
@@ -65,6 +67,7 @@ class Bubble(QWidget):
         x = max(area.left() + 4, min(x, area.right() - inner_w - 4))
         y = max(area.top() + 4, min(y, area.bottom() - inner_h - 4))
         self.move(int(x) - SHADOW, int(y) - SHADOW)
+        self.backdrop = frosted(self.frameGeometry(), owner=self) if is_glass() else None
         self.update()
         if fresh:
             self.setWindowOpacity(0.0)
@@ -90,11 +93,14 @@ class Bubble(QWidget):
             painter.drawRoundedRect(box.adjusted(-i, -i + 2, i, i + 2), 10 + i, 10 + i)
         path = QPainterPath()
         path.addRoundedRect(box, 10, 10)
-        panel = QColor(pal.panel)
-        panel.setAlpha(250)                       # solid enough to read over anything
-        painter.fillPath(path, panel)
-        painter.setPen(QPen(pal.border, 1))
-        painter.drawPath(path)
+        if is_glass():
+            paint_pane(painter, path, self.backdrop, pal.panel, pal.text.lightness() > 128)
+        else:
+            panel = QColor(pal.panel)
+            panel.setAlpha(250)                       # solid enough to read over anything
+            painter.fillPath(path, panel)
+            painter.setPen(QPen(pal.border, 1))
+            painter.drawPath(path)
         colours = [pal.accent, pal.text, pal.muted]
         painter.translate(box.topLeft())
         for (font, text, rect), colour in zip(self._blocks(), colours[-len(self._blocks()):] if not self.title else colours):

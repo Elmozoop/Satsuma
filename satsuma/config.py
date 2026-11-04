@@ -8,7 +8,7 @@ from pathlib import Path
 
 APP_NAME = "Satsuma"
 APP_ID = "satsuma.win"
-VERSION = "1.12.0"
+VERSION = "1.13.0"
 
 
 def _base_dir() -> Path:
@@ -60,6 +60,8 @@ DEFAULTS = {
     "theme": "system",       # system | dark | light
     "smart_detect": True,      # only reveal the menu once real files are dragged
     # ---- look & feel
+    "style": "glass",          # glass | solid: frosted see-through surfaces, or plain ones
+    "tutorial_done": False,    # the first-run tour has been seen
     "accent": "#FF8A1F",
     "menu_scale": 1.0,         # 0.7 .. 1.5
     "glass_opacity": 0.86,     # how solid the ring is
@@ -134,6 +136,8 @@ class Settings:
             self._data["hub_switch_ms"] = DEFAULTS["hub_switch_ms"]
         if self._data.get("anim_speed") not in ("off", "fast", "normal", "relaxed"):
             self._data["anim_speed"] = "normal"
+        if self._data.get("style") not in ("glass", "solid"):
+            self._data["style"] = "glass"
         if self._data.get("hub_info") not in ("size", "name", "type"):
             self._data["hub_info"] = "size"
         if self._data.get("start_page") not in ("convert", "tools"):

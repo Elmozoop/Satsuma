@@ -12,6 +12,7 @@ from PySide6.QtWidgets import QApplication, QWidget
 from .. import winutil
 from ..engine.paths import human_size, open_file, reveal, undo_targets
 from . import thumbs
+from .glass import frosted, is_glass, paint_pane
 from .anim import FrameClock, Spring
 from .icons import draw_icon
 from .theme import palette, ui_font
@@ -81,6 +82,7 @@ class Toasts(QWidget):
         self.setAttribute(Qt.WA_ShowWithoutActivating, True)
         self.setMouseTracking(True)
         self.cards: list[Card] = []
+        self.backdrop = None                # Glass: the blurred screen behind the card stack
         self.hover_button: tuple[int, str] | None = None
         self._drag_from: tuple[QPointF, Card] | None = None   # press on a finished card's body
         self._tick = QTimer(self)
@@ -210,12 +212,15 @@ class Toasts(QWidget):
     def _relayout(self) -> None:
         if not self.cards:
             self.hide()
+            self.backdrop = None
             return
         height = len(self.cards) * (CARD_H + 8) - 8 + SHADOW * 2
         self.setFixedSize(CARD_W + SHADOW * 2, height)
         area = QGuiApplication.primaryScreen().availableGeometry()
         self.move(QPoint(area.right() - self.width() - MARGIN + SHADOW,
                          area.bottom() - self.height() - MARGIN + SHADOW))
+        if is_glass():
+            self.backdrop = frosted(self.frameGeometry(), owner=self)
         if not self.isVisible():
             self.show()
         self.update()
@@ -329,9 +334,12 @@ class Toasts(QWidget):
             painter.drawRoundedRect(rect.adjusted(-i, -i + 3, i, i + 3), 12 + i, 12 + i)
         path = QPainterPath()
         path.addRoundedRect(rect, 12, 12)
-        painter.fillPath(path, pal.panel)
-        painter.setPen(QPen(pal.border, 1))
-        painter.drawPath(path)
+        if is_glass():
+            paint_pane(painter, path, self.backdrop, pal.panel, pal.text.lightness() > 128)
+        else:
+            painter.fillPath(path, pal.panel)
+            painter.setPen(QPen(pal.border, 1))
+            painter.drawPath(path)
 
         status_color = {"running": pal.accent, "cancelling": pal.muted, "done": pal.success,
                         "failed": pal.danger, "cancelled": pal.muted, "undone": pal.muted}[card.state]

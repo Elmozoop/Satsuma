@@ -3,7 +3,9 @@
     .venv\\Scripts\\python.exe tools\\make_screenshots.py
 
 Everything is drawn by Satsuma's own code with throwaway settings, so the pictures always match
-the app. Writes demo.webp, menu.png, cards.png, prompt.png, settings.png and watch.png.
+the app. Writes demo.webp, menu.png, cards.png, prompt.png, settings.png, watch.png and tour.png.
+
+Glass surfaces show a blurred "wallpaper" made here, never whatever is on the real screen.
 """
 from __future__ import annotations
 
@@ -18,7 +20,7 @@ sys.path.insert(0, str(ROOT))
 
 from PIL import Image, ImageDraw  # noqa: E402
 from PySide6.QtCore import QPointF, QRectF, Qt, QTimer  # noqa: E402
-from PySide6.QtGui import QColor, QImage, QLinearGradient, QPainter, QPainterPath, QPen  # noqa: E402
+from PySide6.QtGui import QColor, QImage, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 app = QApplication(sys.argv)
@@ -28,7 +30,9 @@ from satsuma.engine import images  # noqa: E402
 from satsuma.ui import prompts  # noqa: E402
 from satsuma.ui.radial import RadialView, Wedge  # noqa: E402
 from satsuma.ui.settings_window import WATCH_PAGE, SettingsWindow  # noqa: E402
+from satsuma.ui.glass import blur_image  # noqa: E402
 from satsuma.ui.toast import Toasts  # noqa: E402
+from satsuma.ui.tutorial import Tutorial  # noqa: E402
 
 DOCS = ROOT / "docs"
 WORK = Path(tempfile.mkdtemp(prefix="satsuma-shot-files-"))
@@ -67,11 +71,59 @@ def sample_photo() -> Path:
     return path
 
 
-def backdrop(painter: QPainter, width: int, height: int, dark: bool = True) -> None:
+def wallpaper(width: int, height: int, dark: bool = True) -> QImage:
+    """A made-up desktop wallpaper with soft colour blobs, so glass has something to blur."""
+    from PySide6.QtGui import QRadialGradient
+
+    image = QImage(width, height, QImage.Format_RGB32)
+    painter = QPainter(image)
+    painter.setRenderHint(QPainter.Antialiasing)
     gradient = QLinearGradient(0, 0, width, height)
     gradient.setColorAt(0, QColor(46, 58, 92) if dark else QColor(214, 228, 248))
     gradient.setColorAt(1, QColor(24, 26, 38) if dark else QColor(240, 212, 196))
     painter.fillRect(QRectF(0, 0, width, height), gradient)
+    for fx, fy, fr, colour in ((0.2, 0.3, 0.32, (255, 140, 60)), (0.75, 0.25, 0.28, (90, 150, 255)),
+                               (0.55, 0.8, 0.3, (220, 90, 200)), (0.9, 0.85, 0.22, (60, 210, 170))):
+        blob = QRadialGradient(QPointF(width * fx, height * fy), max(width, height) * fr)
+        blob.setColorAt(0, QColor(*colour, 150 if dark else 120))
+        blob.setColorAt(1, QColor(*colour, 0))
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(blob)
+        painter.drawRect(QRectF(0, 0, width, height))
+    painter.end()
+    return image
+
+
+def backdrop(painter: QPainter, width: int, height: int, dark: bool = True) -> None:
+    painter.drawImage(QRectF(0, 0, width, height), wallpaper(width, height, dark))
+
+
+def staged(widget, path: Path, wait: int = 900, page=None) -> None:
+    """Screenshot a real window on screen, in front of a made-up wallpaper (so Glass blurs that,
+    never the real desktop)."""
+    from PySide6.QtGui import QGuiApplication
+    from PySide6.QtWidgets import QLabel
+
+    area = QGuiApplication.primaryScreen().availableGeometry()
+    stage = QLabel()
+    stage.setWindowFlags(Qt.FramelessWindowHint | Qt.Tool | Qt.WindowStaysOnTopHint)
+    stage.setGeometry(area)
+    stage.setPixmap(QPixmap.fromImage(wallpaper(area.width(), area.height(), settings.get("theme") != "light")))
+    stage.show()
+    widget.setWindowFlags(widget.windowFlags() | Qt.WindowStaysOnTopHint)
+    widget.move(area.left() + 60, area.top() + 40)
+    widget.show()
+    widget.raise_()
+    if page is not None:
+        page(widget)
+    spin(wait)
+    frame = widget.frameGeometry()
+    QGuiApplication.primaryScreen().grabWindow(0, frame.x(), frame.y(), frame.width(), frame.height()).save(str(path))
+    widget.close()
+    widget.deleteLater()
+    stage.close()
+    stage.deleteLater()
+    spin(150)
 
 
 def draw_cursor(painter: QPainter, at: QPointF, carrying: Path | None) -> None:
@@ -113,15 +165,19 @@ def demo_animation(photo: Path) -> None:
     frames: list[QImage] = []
     cursor = QPointF(60, 430)
     dt = 1 / FPS
+    wall = wallpaper(width, height)
+    view.backdrop = blur_image(wall)
 
     def frame(carrying=True, card=False) -> None:
         image = QImage(width, height, QImage.Format_ARGB32_Premultiplied)
         painter = QPainter(image)
         painter.setRenderHint(QPainter.Antialiasing)
-        backdrop(painter, width, height)
+        painter.drawImage(0, 0, wall)
         view.paint(painter, centre)
         if card:
             toasts._frame(dt)
+            spot = (width - toasts.width() - 4, height - toasts.height() - 4)
+            toasts.backdrop = blur_image(wall.copy(spot[0], spot[1], toasts.width(), toasts.height()))
             shot = QImage(toasts.size(), QImage.Format_ARGB32_Premultiplied)
             shot.fill(Qt.transparent)
             toasts.render(shot)
@@ -212,6 +268,7 @@ def menu_png(photo: Path) -> None:
         view.open(animate=False)
         view.opening.snap(1.0)
         side = view.side
+        view.backdrop = blur_image(wallpaper(side, side, dark=theme == "dark"))
         image = QImage(side, side, QImage.Format_ARGB32_Premultiplied)
         painter = QPainter(image)
         backdrop(painter, side, side, dark=theme == "dark")
@@ -244,9 +301,11 @@ def cards_png(photo: Path) -> None:
     toasts.sources(2, [str(clip)])
     toasts.progress(2, 0.42, "42%")
     spin(1400)
+    wall = wallpaper(toasts.width(), toasts.height())
+    toasts.backdrop = blur_image(wall)
     image = QImage(toasts.size(), QImage.Format_ARGB32_Premultiplied)
     painter = QPainter(image)
-    backdrop(painter, image.width(), image.height())
+    painter.drawImage(0, 0, wall)
     painter.end()
     toasts.render(image)
     image.save(str(DOCS / "cards.png"))
@@ -269,15 +328,14 @@ def main() -> None:
     demo_animation(photo)
     menu_png(photo)
     cards_png(photo)
-    window_png(prompts.ResizePrompt([photo]), DOCS / "prompt.png", 400)
-    window_png(SettingsWindow(), DOCS / "settings.png", 1300)
+    staged(prompts.ResizePrompt([photo]), DOCS / "prompt.png", 500)
+    staged(SettingsWindow(), DOCS / "settings.png", 1500)
     settings.set("watch_rules", [
         {"folder": str(Path.home() / "Pictures" / "Screenshots"), "action": "img-webp", "enabled": True},
         {"folder": str(Path.home() / "Documents" / "Scans"), "action": "pdf-compress", "enabled": True}])
-    window = SettingsWindow()
-    window.nav.setCurrentRow(WATCH_PAGE)
-    window_png(window, DOCS / "watch.png", 400)
-    for name in ("demo.webp", "menu.png", "cards.png", "prompt.png", "settings.png", "watch.png"):
+    staged(SettingsWindow(), DOCS / "watch.png", 700, page=lambda w: w.nav.setCurrentRow(WATCH_PAGE))
+    staged(Tutorial(), DOCS / "tour.png", 1500, page=lambda t: t.go(2))
+    for name in ("demo.webp", "menu.png", "cards.png", "prompt.png", "settings.png", "watch.png", "tour.png"):
         print(f"{name:<13} {(DOCS / name).stat().st_size / 1024:7.0f} KB")
 
 

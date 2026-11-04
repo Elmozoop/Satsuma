@@ -23,6 +23,7 @@ from ..config import settings
 from ..explain import explain
 from .anim import FrameClock
 from .bubble import Bubble
+from .glass import frosted, is_glass
 from .icons import draw_icon
 from .radial import PLATE_PAD, RadialView, Wedge
 from .theme import palette
@@ -196,11 +197,16 @@ class ActionMenu(QWidget):
         self.view.set_hover(None)
         self.view.opening.snap(0.0)
         self.view.glow.snap(0.0)
+        self.view.backdrop = None
         self.view.release()
         self.hide()
         self.closed.emit()
 
     # ------------------------------------------------------------------ geometry
+    def _capture_backdrop(self) -> None:
+        """Glass: a blurred picture of the screen behind the ring (the ring itself left out)."""
+        self.view.backdrop = frosted(self.frameGeometry(), owner=self) if is_glass() else None
+
     def _place_sensor(self, cursor: QPoint) -> None:
         self.setFixedSize(SENSE_SIZE, SENSE_SIZE)
         self.move(cursor.x() - SENSE_SIZE // 2, cursor.y() - SENSE_SIZE // 2)
@@ -214,6 +220,7 @@ class ActionMenu(QWidget):
         cx = max(area.left() + reach, min(cursor.x(), area.right() - reach))
         cy = max(area.top() + reach, min(cursor.y(), area.bottom() - reach))
         self.move(cx - side // 2, cy - side // 2)
+        self._capture_backdrop()
         self.view.open(animate=True)
         self.clock.start()
         self.update()
@@ -225,6 +232,7 @@ class ActionMenu(QWidget):
         side = self.view.side
         self.setFixedSize(side, side)
         self.move(middle.x() - side // 2, middle.y() - side // 2)
+        self._capture_backdrop()
 
     # ------------------------------------------------------------------ animation
     def _frame(self, dt: float) -> None:
@@ -384,6 +392,8 @@ class ActionMenu(QWidget):
         self._press = None
         if self._moving_window:
             self._moving_window = False
+            self._capture_backdrop()                # moved somewhere new: blur what's there now
+            self.update()
             return
         target = self.view.hit(event.position(), self.center)
         if self.mode not in ("click", "pinned"):

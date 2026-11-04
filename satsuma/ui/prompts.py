@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (QButtonGroup, QDialog, QDialogButtonBox, QFrame, 
 
 from ..engine import ffmpeg_tool as ff
 from .controls import stylesheet
+from .glass import glass_window
 from .thumbs import file_icon, thumbnail
 
 THUMB = 64
@@ -66,6 +67,7 @@ class _Base(QDialog):
         self.setWindowTitle(f"Satsuma — {title}")
         self.setWindowFlags(Qt.Dialog | Qt.WindowStaysOnTopHint | Qt.WindowCloseButtonHint)
         self.setMinimumWidth(400)
+        glass_window(self)
         self.setStyleSheet(stylesheet())
         self.layout_ = QVBoxLayout(self)
         self.layout_.setContentsMargins(22, 20, 22, 18)
