@@ -8,7 +8,11 @@ from pathlib import Path
 
 APP_NAME = "Satsuma"
 APP_ID = "satsuma.win"
-VERSION = "1.13.0"
+VERSION = "1.14.0"
+# The anonymous user counter (see telemetry.py and server/). Empty: Satsuma sends nothing.
+STATS_URL = ""
+GITHUB_REPO = "Elmozoop/Satsuma"
+OWNER_FILE_NAME = "owner.json"     # only on the author's PC: unlocks the Stats window
 
 
 def _base_dir() -> Path:
@@ -62,6 +66,9 @@ DEFAULTS = {
     # ---- look & feel
     "style": "glass",          # glass | solid: frosted see-through surfaces, or plain ones
     "tutorial_done": False,    # the first-run tour has been seen
+    "auto_update": True,       # Satsuma.exe installs new releases by itself (updater.py)
+    "count_me": True,          # send the anonymous "I'm running" signal (telemetry.py)
+    "install_id": "",          # a random id for that signal, made on first use
     "accent": "#FF8A1F",
     "menu_scale": 1.0,         # 0.7 .. 1.5
     "glass_opacity": 0.86,     # how solid the ring is

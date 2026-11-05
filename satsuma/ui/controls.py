@@ -175,6 +175,7 @@ def stylesheet() -> str:
     QLabel#rowTitle {{ font-size: 10pt; }}
     QLabel#rowHint, QLabel#hint {{ color: {muted}; font-size: 9pt; }}
     QLabel#tourBody {{ color: {text}; font-size: 10.5pt; }}
+    QLabel#bigNumber {{ color: {text}; font-size: 22pt; font-weight: 600; }}
     QLabel#value {{ color: {muted}; }}
     QLabel#example {{ color: {muted}; font-family: "Cascadia Mono", Consolas, monospace; font-size: 9pt; }}
     QLabel#promptTitle {{ font-size: 15pt; font-weight: 600; }}

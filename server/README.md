@@ -1,0 +1,35 @@
+# Satsuma's user counter
+
+A tiny Cloudflare Worker that counts how many people run Satsuma. Each running copy sends an
+anonymous ping every 10 minutes (a random ID made on that PC, plus the version); the owner's
+**Stats** window reads the totals with a private key. Cloudflare's free plan is plenty.
+
+Everything below happens in the Cloudflare website; nothing to install.
+
+## 1. Create the database
+1. Sign up or log in at <https://dash.cloudflare.com>.
+2. **Storage & Databases → D1 SQL Database → Create**. Name it `satsuma-stats`.
+3. Open it → **Console**, paste everything from [`schema.sql`](schema.sql), and press **Execute**.
+
+## 2. Create the Worker
+1. **Compute (Workers) → Workers & Pages → Create → Create Worker**. Name it `satsuma-stats`, **Deploy**.
+2. **Edit code**: replace everything with [`worker.js`](worker.js), then **Deploy**.
+3. Back on the Worker: **Settings → Bindings → Add → D1 database**. Variable name `DB`,
+   database `satsuma-stats`. Save.
+4. **Settings → Variables and Secrets → Add**: type **Secret**, name `STATS_KEY`, value: the
+   `key` from your `%LOCALAPPDATA%\Satsuma\owner.json`. Save and deploy.
+5. Copy the Worker's address from its overview page. It looks like
+   `https://satsuma-stats.<your-name>.workers.dev`.
+
+## 3. Connect Satsuma
+Send that address to whoever builds Satsuma (or put it in `STATS_URL` in `satsuma/config.py`
+yourself and rebuild). Until it's set, Satsuma sends nothing.
+
+## Check it
+- Open the address in a browser: it should say **Satsuma counter**.
+- On the owner's PC: right-click the 🍊 → **Stats…** shows *online now*, the last 24 hours and 30
+  days, installs ever, versions in use, and downloads per GitHub release.
+
+## What's stored
+One row per install: the random ID, the Satsuma version, and when it was first and last seen.
+No IP addresses, names, file information or anything else.

@@ -994,6 +994,18 @@ class SettingsWindow(QDialog):
         tour.clicked.connect(self.tour_requested.emit)
         about.add("New here?", "A one-minute guided tour, with a practice ring", tour)
 
+        updates = self._section(layout, "Updates")
+        updates.add("Update automatically",
+                    "A few times a day Satsuma.exe checks GitHub for a new version. If there is one, it "
+                    "downloads and checks it, then installs it when you're not using Satsuma.",
+                    _toggle("auto_update"))
+
+        privacy = self._section(layout, "Privacy")
+        privacy.add("Count me as an active user",
+                    "Every 10 minutes Satsuma sends an anonymous random ID and its version number, so "
+                    "the author can see how many people use it. Nothing about you or your files.",
+                    _toggle("count_me"))
+
         danger = self._section(layout, "Reset")
         reset = QPushButton("Reset everything")
         reset.setObjectName("danger")

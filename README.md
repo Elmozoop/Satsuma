@@ -22,6 +22,9 @@ without opening a single app. Everything runs **locally on your PC** — files a
 Put `Satsuma.exe` anywhere you like (Documents, a Tools folder…). Your settings live in
 `%LOCALAPPDATA%\Satsuma`, so moving or updating the exe keeps them.
 
+**It keeps itself up to date.** From 1.14 on, Satsuma.exe installs new versions by itself, quietly,
+when you're not using it, and tells you when it has. (Have 1.13 or older? Download it once more.)
+
 > **Windows SmartScreen** may say it "protected your PC" the first time, because Satsuma.exe isn't
 > signed with a paid certificate. Click **More info → Run anyway**.
 
@@ -105,7 +108,7 @@ Speed ask too:
 - **Video & audio** — FFmpeg. Satsuma downloads it automatically the first time you use a
   video/audio action (a one-time 100–200 MB download, saved in `%LOCALAPPDATA%\Satsuma\bin`;
   if FFmpeg is already on your PATH it uses that instead). You can also press
-  *Download FFmpeg* in Settings. That download is the only time Satsuma uses the internet.
+  *Download FFmpeg* in Settings.
 - **Word / PowerPoint / Excel** — Microsoft Office, or [LibreOffice](https://www.libreoffice.org/)
   (free). Either one works for every Office conversion above; Office runs hidden in the
   background. Password-protected files are refused straight away with a clear message.
@@ -116,6 +119,20 @@ The first time Satsuma starts, a short guided tour walks through everything, wit
 where you can try a drag without touching a real file. Replay it any time from the 🍊 menu → **Tour…**
 
 ![the tour's practice step](docs/tour.png)
+
+## Privacy
+
+Your files never leave your PC: every conversion runs locally, and nothing about your files, their
+names or what you do with them is ever sent anywhere.
+
+Satsuma goes online for three things only:
+- **FFmpeg**, downloaded once the first time you use a video or audio action.
+- **Updates** *(Satsuma.exe only)*: a few times a day it asks GitHub whether there's a newer release.
+  If there is, it downloads it, checks it against the SHA-256 GitHub lists for it, and installs it
+  the next time you're not using Satsuma. Turn it off in **Settings → About → Update automatically**.
+- **An anonymous "I'm running" signal**, so the author can see how many people use Satsuma. Every
+  10 minutes it sends a random ID made on your PC (not linked to you) and the Satsuma version.
+  Turn it off in **Settings → About → Count me as an active user** (also on the tour's last page).
 
 ## Customise
 
@@ -141,7 +158,7 @@ Settings → Appearance → Style.
 - **Watched folders** — run an action on every new file in a folder (say, Screenshots → WEBP).
   Files already there are left alone, and Satsuma never re-processes its own results.
 - **Converters** — JPG/WEBP quality, compression strength, FFmpeg and Office/LibreOffice status.
-- **About** — version, log, data folder, reset everything.
+- **About** — version, automatic updates, the user count, log, data folder, reset everything.
 
 ![watched folders](docs/watch.png)
 

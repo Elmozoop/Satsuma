@@ -31,6 +31,9 @@ from .ui.controls import message, stylesheet
 from .ui.glass import glass_window
 from .ui.toast import Toasts
 from .ui.tray_badge import TrayActivity
+from .telemetry import Pinger
+from . import updater
+from .updater import Updater
 from .watcher import FolderWatcher
 
 log = logging.getLogger("satsuma")
@@ -98,6 +101,8 @@ class Satsuma(QObject):
         self.toasts = Toasts()
         self.runner = JobRunner(self)
         self.watcher = FolderWatcher(self.runner, self)
+        self.pinger = Pinger(self)
+        self.updater = Updater(self._idle_for_update, self.quit, self)
         self.detector = DragDetector(self)
         self.settings_window: SettingsWindow | None = None
         self.tutorial_window = None
@@ -167,6 +172,8 @@ class Satsuma(QObject):
         menu.addSeparator()
         menu.addAction("Settings…", self.show_settings)
         menu.addAction("Tour…", self.show_tutorial)
+        self.stats_action = menu.addAction("Stats…", self.show_stats)    # only on the author's PC
+        self.stats_action.setVisible(False)
         menu.addSeparator()
         menu.addAction("Open log", lambda: open_file(LOG_FILE))
         menu.addAction("Quit", self.quit)
@@ -182,6 +189,9 @@ class Satsuma(QObject):
 
     def _tray_menu_opening(self) -> None:
         self._tray_menu.setStyleSheet(stylesheet())          # theme, accent and style may have changed
+        from .ui.stats_window import owner_config
+
+        self.stats_action.setVisible(owner_config() is not None)
         self.enabled_action.setChecked(bool(settings.get("enabled")))
         self.info_action.setChecked(bool(settings.get("explain_actions")))   # may have changed in Settings
         targets = [p for p in undo_targets(self._last_outputs) if p.exists()]
@@ -370,6 +380,24 @@ class Satsuma(QObject):
         self.tutorial_window.raise_()
         self.tutorial_window.activateWindow()
 
+    def show_stats(self) -> None:
+        from .ui.stats_window import StatsWindow, owner_config
+
+        owner = owner_config()
+        if owner is None:
+            return
+        if getattr(self, "stats_window", None) is None:
+            self.stats_window = StatsWindow(owner)
+            self.stats_window.finished.connect(self._stats_closed)
+        self.stats_window.show()
+        self.stats_window.raise_()
+        self.stats_window.activateWindow()
+
+    def _stats_closed(self) -> None:
+        window, self.stats_window = self.stats_window, None
+        if window is not None:
+            window.deleteLater()
+
     def _tutorial_closed(self) -> None:
         window, self.tutorial_window = self.tutorial_window, None
         if window is not None:
@@ -412,9 +440,29 @@ class Satsuma(QObject):
         gc.collect()
         winutil.trim_working_set()
 
+    def _idle_for_update(self) -> bool:
+        """Nothing on screen and nothing running: a restart now goes unnoticed."""
+        return not (self.menu.isVisible() or self.toasts.isVisible() or self.settings_window is not None
+                    or self.tutorial_window is not None or getattr(self, "stats_window", None) is not None
+                    or self.runner.pool.activeThreadCount() > 0 or QApplication.activePopupWidget()
+                    or QApplication.activeModalWidget())
+
+    def announce_update(self) -> None:
+        if QSystemTrayIcon.supportsMessages():
+            self.tray.showMessage(f"Satsuma updated to {VERSION}",
+                                  "It updated itself in the background. Your settings are just as they were.",
+                                  app_icon(), 6000)
+        self._clean_old()
+
+    def _clean_old(self, tries: int = 10) -> None:
+        if not updater.cleanup() and tries > 1:     # the old copy may take a moment to let go
+            QTimer.singleShot(3000, lambda: self._clean_old(tries - 1))
+
     def quit(self) -> None:
         self.detector.stop()
         self.watcher.stop()
+        self.pinger.stop()
+        self.updater.stop()
         self.tray.hide()
         if self.server:
             self.server.close()
@@ -434,6 +482,9 @@ def main(argv: list[str] | None = None) -> int:
         target = next((a.split("=", 1)[1] for a in args if a.startswith("--report=")), None)
         return run(Path(target) if target else DATA_DIR / "selftest.txt")
     background = "--background" in args
+    after_update = next((a.split("=", 1)[1] for a in args if a.startswith("--after-update=")), None)
+    if after_update and after_update.isdigit():
+        updater.wait_for_exit(int(after_update))     # the old version is still closing
     want_settings = "--settings" in args
     files = [a for a in args if not a.startswith("--")]
 
@@ -472,6 +523,10 @@ def main(argv: list[str] | None = None) -> int:
         QTimer.singleShot(500, satsuma.show_tutorial)     # first run: the tour instead of a balloon
     elif not background:
         QTimer.singleShot(400, satsuma.greet)
+    if after_update:
+        QTimer.singleShot(1500, satsuma.announce_update)
+    else:
+        QTimer.singleShot(5000, satsuma._clean_old)
     app._satsuma = satsuma  # keep a strong reference for the lifetime of the app
     code = app.exec()
     satsuma.runner.pool.waitForDone(3000)

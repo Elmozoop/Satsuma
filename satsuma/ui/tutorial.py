@@ -452,6 +452,14 @@ class Tutorial(QDialog):
         drop.setObjectName("primary")
         drop.clicked.connect(lambda: (self.finish(), self.open_drop_window.emit()))
         rows.addWidget(drop)
+        counted = Toggle(bool(settings.get("count_me")))
+        counted.toggled.connect(lambda v: settings.set("count_me", v))
+        row = QHBoxLayout()
+        row.addWidget(_label("Count me as an active user<br><span style='font-size:9pt'>An anonymous random "
+                             "ID and the version, every 10 minutes. Nothing about you or your files.</span>",
+                             "rowTitle"), 1)
+        row.addWidget(counted)
+        rows.addLayout(row)
         rows.addWidget(_label("You can replay this tour any time from the 🍊 menu → <b>Tour</b>.", "hint"))
         return self._page(
             "You're all set",
