@@ -8,7 +8,7 @@ from pathlib import Path
 
 APP_NAME = "Satsuma"
 APP_ID = "satsuma.win"
-VERSION = "1.15.1"
+VERSION = "1.16.0"
 # The anonymous user counter (see telemetry.py and server/). Empty: Satsuma sends nothing.
 STATS_URL = "https://satsuma-stats.ryash0394.workers.dev"
 GITHUB_REPO = "Elmozoop/Satsuma"
@@ -61,7 +61,10 @@ DEFAULTS = {
     "scrim_opacity": 0.38,
     "drag_threshold": 12,         # px of movement before the menu arms
     "autostart": False,
-    "autostart_asked": False,  # asked once, after the first-run tour, whether to start with Windows
+    "autostart_asked": False,
+    "whats_new": {},           # set by the updater just before it installs; shown once afterwards
+    "hotkey_warned": "",       # the taken shortcut we already told the user about
+    "hotkey": "ctrl+shift+space",  # opens the ring for the files selected in Explorer (hotkey.py); "" = off  # asked once, after the first-run tour, whether to start with Windows
     "theme": "system",       # system | dark | light
     "smart_detect": True,      # only reveal the menu once real files are dragged
     # ---- look & feel

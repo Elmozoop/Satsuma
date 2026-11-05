@@ -73,6 +73,7 @@ class Card:
 
 class Toasts(QWidget):
     cancel_requested = Signal(int)   # job id
+    report_requested = Signal(str, str)   # what failed, the error message
 
     def __init__(self):
         super().__init__(None)
@@ -308,6 +309,8 @@ class Toasts(QWidget):
                     open_file(card.outputs[0])
                 elif name == "reveal" and card.outputs:
                     reveal(card.outputs[0])
+                elif name == "report" and card.state == "failed":
+                    self.report_requested.emit(card.title, card.message)
                 return
 
     # ----------------------------------------------------------------- paint
@@ -396,6 +399,8 @@ class Toasts(QWidget):
             for name, text in labels:
                 x = self._button(painter, card, name, text, x, bottom, pal) + 6
             self._button(painter, card, "undo", "Undo", rect.right() - 14, bottom, pal, right=True)
+        elif card.state == "failed":
+            self._button(painter, card, "report", "Report", rect.right() - 14, bottom, pal, right=True)
 
     @staticmethod
     def _paint_thumb(painter: QPainter, card: Card, thumb: QPixmap, box: QRectF, pal, status: QColor) -> None:

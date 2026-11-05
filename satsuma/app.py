@@ -34,6 +34,7 @@ from .ui.tray_badge import TrayActivity
 from .telemetry import Pinger
 from . import updater
 from .updater import Updater
+from .hotkey import Hotkey, label as hotkey_label
 from .watcher import FolderWatcher
 
 log = logging.getLogger("satsuma")
@@ -103,6 +104,11 @@ class Satsuma(QObject):
         self.watcher = FolderWatcher(self.runner, self)
         self.pinger = Pinger(self)
         self.updater = Updater(self._idle_for_update, self.quit, self)
+        self.hotkey = Hotkey(self)
+        self.hotkey.pressed.connect(self.open_for_selection)
+        self.hotkey.taken.connect(self._shortcut_taken)
+        if settings.get("hotkey") and not self.hotkey.registered:
+            QTimer.singleShot(3000, lambda: self._shortcut_taken(hotkey_label()))
         self.detector = DragDetector(self)
         self.settings_window: SettingsWindow | None = None
         self.tutorial_window = None
@@ -123,6 +129,7 @@ class Satsuma(QObject):
         s.cancelled.connect(self.toasts.cancelled)
         s.finished.connect(self.on_finished)
         self.toasts.cancel_requested.connect(self.runner.cancel)
+        self.toasts.report_requested.connect(lambda what, error: self.report_problem(what, error))
 
         self.detector.armed.connect(lambda pos: self.menu.arm(pos, smart=bool(settings.get("smart_detect"))))
         self.detector.moved.connect(self.on_moved)
@@ -175,6 +182,7 @@ class Satsuma(QObject):
         self.stats_action = menu.addAction("Stats…", self.show_stats)    # only on the author's PC
         self.stats_action.setVisible(False)
         menu.addSeparator()
+        menu.addAction("Report a problem…", lambda: self.report_problem())
         menu.addAction("Open log", lambda: open_file(LOG_FILE))
         menu.addAction("Quit", self.quit)
         menu.aboutToShow.connect(self._tray_menu_opening)
@@ -459,6 +467,37 @@ class Satsuma(QObject):
         gc.collect()
         winutil.trim_working_set()
 
+    def report_problem(self, what: str = "", error: str = "") -> None:
+        from . import report
+
+        report.report(what, error)
+        if QSystemTrayIcon.supportsMessages():
+            self.tray.showMessage("Report a problem",
+                                  "Your browser opened a new GitHub issue. Satsuma's recent log is on your "
+                                  "clipboard: paste it in if you like.", app_icon(), 6000)
+
+    def _shortcut_taken(self, name: str) -> None:
+        if not name or settings.get("hotkey_warned") == name:     # say it once per shortcut
+            return
+        settings.set("hotkey_warned", name)
+        if QSystemTrayIcon.supportsMessages():
+            self.tray.showMessage(f"{name} is taken",
+                                  f"Another app already uses {name}. Pick a different shortcut in "
+                                  "Settings → Trigger → Keyboard.", app_icon(), 8000)
+
+    def open_for_selection(self) -> None:
+        """The keyboard shortcut: the ring for whatever is selected in Explorer or on the desktop."""
+        from .hotkey import foreground_window, selected_files
+
+        if self.menu.isVisible() and self.menu.mode in ("click", "pinned"):
+            self.menu.dismiss()                     # pressing it again closes the ring
+            return
+        paths = selected_files(foreground_window())
+        if paths:
+            self.menu.open_for(paths, QCursor.pos())
+        else:
+            self.menu.open_pinned()                 # nothing selected: the drop window instead
+
     def _idle_for_update(self) -> bool:
         """Nothing on screen and nothing running: a restart now goes unnoticed."""
         return not (self.menu.isVisible() or self.toasts.isVisible() or self.settings_window is not None
@@ -467,7 +506,17 @@ class Satsuma(QObject):
                     or QApplication.activeModalWidget())
 
     def announce_update(self) -> None:
-        if QSystemTrayIcon.supportsMessages():
+        """After a self-update: the What's new card (or a plain notification if there's nothing to say)."""
+        news = dict(settings.get("whats_new") or {})
+        settings.set("whats_new", {})
+        if news.get("version") == VERSION and news.get("highlights"):
+            from .ui.whats_new import WhatsNew
+
+            self.whats_new = WhatsNew(VERSION, list(news["highlights"]),
+                                      str(news.get("url") or "https://github.com/Elmozoop/Satsuma/releases/latest"))
+            self.whats_new.show()
+            self.whats_new.raise_()
+        elif QSystemTrayIcon.supportsMessages():
             self.tray.showMessage(f"Satsuma updated to {VERSION}",
                                   "It updated itself in the background. Your settings are just as they were.",
                                   app_icon(), 6000)
@@ -482,6 +531,7 @@ class Satsuma(QObject):
         self.watcher.stop()
         self.pinger.stop()
         self.updater.stop()
+        self.hotkey.stop()
         self.tray.hide()
         if self.server:
             self.server.close()

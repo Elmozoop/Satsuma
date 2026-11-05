@@ -49,6 +49,7 @@ def _no_autostart_question():
     from satsuma.config import settings
 
     settings.set("autostart_asked", True)
+    settings.set("hotkey", "")   # don't take Ctrl+Shift+Space from the user's own Satsuma
     yield
 
 

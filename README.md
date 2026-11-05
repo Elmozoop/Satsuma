@@ -59,8 +59,8 @@ open the ring.
 
 From 1.14 on, Satsuma checks GitHub for a new version a few times a day. When there is one, it
 downloads it in the background, checks it against the SHA-256 fingerprint GitHub lists for it, and
-installs it the next time you're not using Satsuma. A notification tells you when it's done, and your
-settings stay as they were. *(On 1.13 or older? Download it once more; after that it updates by itself.)*
+installs it the next time you're not using Satsuma. Afterwards a small **What's new** card shows the
+highlights, with a link to the full release notes. Your settings stay as they were. *(On 1.13 or older? Download it once more; after that it updates by itself.)*
 
 ## How to use it
 
@@ -73,6 +73,7 @@ settings stay as they were. *(On 1.13 or older? Download it once more; after tha
 | Rest on the **centre** | The ring swaps between **Convert** and **Tools** (the dots show which) |
 | Drop the file on a wedge | A tick confirms it; the job runs in the background with a card in the corner |
 | Let go anywhere else, or press **Esc** | Nothing happens |
+| Select files in Explorer or on the desktop, press **Ctrl+Shift+Space** | The ring opens at the pointer for them, with no dragging (handy on a trackpad). Press it again to close |
 | Click the 🍊 in the tray | A drop window you can drag files onto without holding Shift |
 | Right-click files → **Send to → Satsuma** | The same ring, click instead of drop *(switch on in Settings)* |
 
@@ -95,6 +96,7 @@ Right-click the 🍊 for:
 - **Convert clipboard:** copied files, or a copied picture (saved to `Pictures\Satsuma clipboard`).
 - **Recent:** your last 10 results; click one to see it in its folder.
 - **Undo:** the last conversion, even after its card has gone.
+- **Report a problem…:** opens a GitHub issue with your Satsuma and Windows versions filled in.
 - **Enabled**, **Info panel beside wedges**, **Settings…**, **Tour…**, **Open log** and **Quit**.
 
 Results are saved next to the original (`photo.png` → `photo.webp`). If that name is taken you get
@@ -149,11 +151,11 @@ behind them. **Solid** keeps them plain. Switch in **Appearance → Style**.
 |---|---|
 | **Appearance** | Style, theme, accent colour, how see-through the ring is, size, wedges per ring, which ring opens first, animation speed and bounce, what the centre shows, icons, colours by file type, the info panel. All with a live preview you can hover and click. |
 | **Ring actions** | For each kind of file, **click a wedge in the preview** to swap in another action or take it off the ring. Or tick and drag in the list. |
-| **Trigger** | The key to hold (Shift, Ctrl or Alt), *only for real file drags*, start with Windows, the *Send to* menu. |
+| **Trigger** | The key to hold (Shift, Ctrl or Alt), *only for real file drags*, the keyboard shortcut (Ctrl+Shift+Space, Ctrl+Alt+Space or off), start with Windows, the *Send to* menu. |
 | **Saving** | Where results go (next to the original, a subfolder, or one folder), replace or add `(1)`, show in Explorer when done. |
 | **Watched folders** | Run an action on every new file in a folder, such as Screenshots → WEBP. Files already there are left alone. |
 | **Converters** | JPG/WEBP quality, compression strength, FFmpeg and Office/LibreOffice status. |
-| **About** | Version, automatic updates, the user count, the tour, log, data folder, reset everything. |
+| **About** | Version, automatic updates, the user count, the tour, **Report a problem**, log, data folder, reset everything. |
 
 ![watched folders](docs/watch.png)
 
@@ -219,10 +221,19 @@ acrylic blur.
 </details>
 
 <details>
-<summary><b>Something failed. Where can I see why?</b></summary>
+<summary><b>Something failed. How do I report it?</b></summary>
 
-The card in the corner says why. For full details, open the 🍊 menu → **Open log**
-(`%LOCALAPPDATA%\Satsuma\satsuma.log`).
+The card in the corner says why. Click **Report** on it (or 🍊 menu → **Report a problem…**): your
+browser opens a new [GitHub issue](https://github.com/Elmozoop/Satsuma/issues) with your Satsuma and
+Windows versions filled in. Satsuma's recent log is put on your clipboard so you can paste it in if you
+want to; nothing is sent without you. The full log is in 🍊 menu → **Open log**.
+</details>
+
+<details>
+<summary><b>Ctrl+Shift+Space doesn't do anything.</b></summary>
+
+Another app may already use it; Satsuma tells you once if so. Pick **Ctrl+Alt+Space** in
+**Settings → Trigger → Keyboard**. The shortcut works in File Explorer windows and on the desktop.
 </details>
 
 <details>

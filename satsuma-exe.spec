@@ -6,7 +6,7 @@ from PyInstaller.utils.hooks import collect_all
 
 datas = [("assets", "assets")]
 binaries = []
-hiddenimports = []
+hiddenimports = ["PySide6.QtAxContainer"]     # the keyboard shortcut reads Explorer's selection
 for package in ("pypdfium2", "pypdfium2_raw", "pillow_heif"):
     found = collect_all(package)
     datas += found[0]

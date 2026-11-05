@@ -21,15 +21,30 @@ Everything below happens in the Cloudflare website; nothing to install.
 5. Copy the Worker's address from its overview page. It looks like
    `https://satsuma-stats.<your-name>.workers.dev`.
 
-## 3. Connect Satsuma
+## 3. Save GitHub downloads every hour
+On the Worker: **Settings → Trigger events → Add → Cron trigger**, enter `0 * * * *` (every hour) and
+save. This saves GitHub's download totals for the downloads chart.
+
+## 4. Connect Satsuma
 Send that address to whoever builds Satsuma (or put it in `STATS_URL` in `satsuma/config.py`
 yourself and rebuild). Until it's set, Satsuma sends nothing.
 
+## Updating an existing counter
+When `worker.js` or `schema.sql` change: paste `schema.sql` into the database's **Console** and
+**Execute** again (it only adds what's missing, nothing is lost), then **Edit code** on the Worker,
+paste the new `worker.js` and **Deploy**.
+
 ## Check it
 - Open the address in a browser: it should say **Satsuma counter**.
+- `/downloads.svg` on that address is the public downloads chart shown in the main README.
 - On the owner's PC: right-click the 🍊 → **Stats…** shows *online now*, the last 24 hours and 30
-  days, installs ever, versions in use, and downloads per GitHub release.
+  days, installs ever, charts of people using Satsuma each day and which versions they run, and
+  downloads per release and over time.
 
 ## What's stored
-One row per install: the random ID, the Satsuma version, and when it was first and last seen.
+- One row per install: the random ID, the Satsuma version, and when it was first and last seen.
+- One row per install per day it was running (the random ID and version), kept for 120 days, for
+  the daily charts.
+- GitHub's public download totals, every hour.
+
 No IP addresses, names, file information or anything else.

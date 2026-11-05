@@ -1,4 +1,4 @@
-"""The owner's Stats window: people using Satsuma right now, and downloads per release.
+"""The owner's Stats window: people using Satsuma (now and day by day), versions, and downloads.
 
 Only on the author's PC: it appears when %LOCALAPPDATA%\\Satsuma\\owner.json exists, holding the
 counter's address and its private key. Downloads come from GitHub's public release data.
@@ -12,6 +12,7 @@ from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequ
 from PySide6.QtWidgets import QDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
 
 from ..config import DATA_DIR, GITHUB_REPO, OWNER_FILE_NAME, STATS_URL
+from .charts import Chart
 from .controls import stylesheet
 from .glass import glass_window
 
@@ -49,7 +50,7 @@ class StatsWindow(QDialog):
         self.setWindowTitle("Satsuma Stats")
         self.setWindowFlags(Qt.Dialog | Qt.WindowCloseButtonHint)
         glass_window(self)
-        self.setMinimumWidth(560)
+        self.setMinimumWidth(760)
         self._network = QNetworkAccessManager(self)
         self._network.finished.connect(self._reply_done)   # a bound slot: gone when the window is
 
@@ -75,6 +76,19 @@ class StatsWindow(QDialog):
         self.versions.setWordWrap(True)
         root.addWidget(self.versions)
 
+        charts = QGridLayout()
+        charts.setHorizontalSpacing(18)
+        charts.setVerticalSpacing(4)
+        self.users_chart = Chart("bars")
+        self.users_chart.empty_text = "Fills in day by day once the counter is updated"
+        self.versions_chart = Chart("stacked")
+        self.versions_chart.empty_text = "Fills in day by day once the counter is updated"
+        charts.addWidget(self._caption("People running Satsuma each day"), 0, 0)
+        charts.addWidget(self._caption("Versions in use each day (how fast updates spread)"), 0, 1)
+        charts.addWidget(self.users_chart, 1, 0)
+        charts.addWidget(self.versions_chart, 1, 1)
+        root.addLayout(charts)
+
         root.addWidget(self._heading("Downloads"))
         downloads = QHBoxLayout()
         self.total_downloads = _number("–", "downloads, all releases")
@@ -84,6 +98,11 @@ class StatsWindow(QDialog):
         self.per_release.setWordWrap(True)
         downloads.addWidget(self.per_release, 1)
         root.addLayout(downloads)
+        root.addWidget(self._caption("Total downloads over time (saved every hour)"))
+        self.downloads_chart = Chart("line")
+        self.downloads_chart.empty_text = "Fills in after the counter has saved downloads for a couple of days"
+        self.downloads_chart.setMinimumHeight(120)
+        root.addWidget(self.downloads_chart)
 
         footer = QHBoxLayout()
         self.status = QLabel("")
@@ -100,6 +119,12 @@ class StatsWindow(QDialog):
         self._timer.timeout.connect(self.refresh)
         self._timer.start()
         self.refresh()
+
+    @staticmethod
+    def _caption(text: str) -> QLabel:
+        label = QLabel(text)
+        label.setObjectName("hint")
+        return label
 
     @staticmethod
     def _heading(text: str) -> QLabel:
@@ -163,6 +188,15 @@ class StatsWindow(QDialog):
         versions = data.get("versions") or {}
         self.versions.setText("Versions in use (last 30 days): " +
                               ", ".join(f"{v} × {n}" for v, n in versions.items()) if versions else "")
+        days = [d for d in data.get("days") or [] if isinstance(d, dict)]
+        if days:
+            labels = [str(d.get("day", "")) for d in days]
+            self.users_chart.set_series(labels, [d.get("active", 0) for d in days])
+            self.versions_chart.set_stacked(labels, [dict(d.get("versions") or {}) for d in days])
+        downloads = [d for d in data.get("downloads") or [] if isinstance(d, dict)]
+        if len(downloads) >= 2:
+            self.downloads_chart.set_series([str(d.get("day", "")) for d in downloads],
+                                            [d.get("total", 0) for d in downloads])
         self.status.setText("Up to date. Refreshes every minute.")
 
     def _got_downloads(self, reply: QNetworkReply) -> None:

@@ -50,6 +50,19 @@ def is_newer(tag: str, current: str = VERSION) -> bool:
     return bool(new and now and new > now)
 
 
+def highlights(notes: str, limit: int = 3) -> list[str]:
+    """The release's headline features: its bold-only lines (**Like this**), else its first bullets."""
+    def plain(text: str) -> str:
+        return re.sub(r"[*_`]|\[([^\]]*)\]\([^)]*\)", lambda m: m.group(1) or "", text).strip()
+
+    lines = [line.strip() for line in (notes or "").splitlines()]
+    bold = [plain(m.group(1)) for line in lines if (m := re.fullmatch(r"\*\*(.+?)\*\*:?", line))]
+    picked = [b for b in bold if b and b.lower().rstrip(":") not in ("also", "notes")]
+    if not picked:
+        picked = [plain(line[2:]) for line in lines if line.startswith(("- ", "* "))]
+    return [p for p in picked if p][:limit]
+
+
 def pick_asset(release: dict) -> dict | None:
     """The release's Satsuma.exe, only if it's a published, newer release with a SHA-256 to check."""
     if release.get("draft") or release.get("prerelease") or not is_newer(str(release.get("tag_name", ""))):
@@ -62,7 +75,9 @@ def pick_asset(release: dict) -> dict | None:
         if not url.startswith(DOWNLOAD_PREFIX) or not re.fullmatch(r"sha256:[0-9a-f]{64}", digest):
             return None
         return {"url": url, "sha256": digest.split(":", 1)[1], "size": int(asset.get("size") or 0),
-                "version": ".".join(map(str, parse_version(release["tag_name"])))}
+                "version": ".".join(map(str, parse_version(release["tag_name"]))),
+                "highlights": highlights(str(release.get("body") or "")),
+                "notes_url": str(release.get("html_url") or f"https://github.com/{GITHUB_REPO}/releases/latest")}
     return None
 
 
@@ -177,7 +192,8 @@ class Updater(QObject):
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._pending: tuple[str, Path] | None = None
-        self._failed: set[str] = set()      # versions that couldn't be installed: don't loop on them
+        self._failed: set[str] = set()
+        self._news: dict | None = None          # what the new version brings, shown after the restart      # versions that couldn't be installed: don't loop on them
         self.ready.connect(self._on_ready)
         self._timer = QTimer(self)
         self._timer.timeout.connect(self.check)
@@ -225,6 +241,8 @@ class Updater(QObject):
             log.info("downloading Satsuma %s", asset["version"])
             path = download(asset, download_path(self._exe), self._stop)
             log.info("Satsuma %s downloaded and verified", asset["version"])
+            self._news = {"version": asset["version"], "highlights": asset["highlights"],
+                          "url": asset["notes_url"]}
             self.ready.emit(asset["version"], str(path))
         except InterruptedError:
             pass
@@ -243,6 +261,8 @@ class Updater(QObject):
         self._install.stop()
         self._pending = None
         try:
+            if self._news:
+                settings.set("whats_new", self._news)    # the new copy reads it and shows the card
             swap(self._exe, path)
             relaunch(self._exe)
         except OSError as exc:        # e.g. a folder Satsuma isn't allowed to write to

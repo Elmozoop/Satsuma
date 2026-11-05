@@ -720,6 +720,12 @@ class SettingsWindow(QDialog):
                  "Ignore text selections and window moves; the ring appears once files arrive",
                  _toggle("smart_detect"))
 
+        keys = self._section(layout, "Keyboard")
+        keys.add("Shortcut for selected files",
+                 "Select files in Explorer or on the desktop, press this, and the ring opens at the pointer",
+                 _segmented((("ctrl+shift+space", "Ctrl+Shift+Space"), ("ctrl+alt+space", "Ctrl+Alt+Space"),
+                             ("", "Off")), "hotkey"))
+
         system = self._section(layout, "Windows")
         self.autostart = Toggle(winutil.autostart_enabled())
         self.autostart.toggled.connect(winutil.set_autostart)
@@ -733,6 +739,12 @@ class SettingsWindow(QDialog):
             self.sendto.setEnabled(False)
         layout.addStretch(1)
         return scroll
+
+    @staticmethod
+    def _report_problem() -> None:
+        from .. import report
+
+        report.report()
 
     def _sendto_toggled(self, enabled: bool) -> None:
         if not winutil.set_sendto(enabled):
@@ -987,6 +999,11 @@ class SettingsWindow(QDialog):
         log = QPushButton("Open log")
         log.clicked.connect(lambda: open_file(LOG_FILE))
         about.add("Something went wrong?", "The log has the details of every failed job", log)
+        problem = QPushButton("Report a problem")
+        problem.clicked.connect(self._report_problem)
+        about.add("Found a bug?",
+                  "Opens a GitHub issue with your Satsuma and Windows versions filled in. The recent log "
+                  "goes on your clipboard to paste in if you want; nothing is sent by itself.", problem)
         data = QPushButton("Open folder")
         data.clicked.connect(lambda: open_file(DATA_DIR))
         about.add("Data folder", str(DATA_DIR), data)

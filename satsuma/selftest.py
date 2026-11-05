@@ -87,6 +87,14 @@ def run(report: Path | None = None) -> int:
     check("glass blur", glass_blur)
     check("tour builds", tour)
 
+    def explorer_access() -> str:
+        from PySide6.QtAxContainer import QAxObject
+
+        return _need(not QAxObject("Shell.Application").isNull(), "Shell.Application")
+
+    if sys.platform == "win32":
+        check("keyboard shortcut can read Explorer", explorer_access)
+
     lines = [f"{'PASS' if ok else 'FAIL'}  {name}: {detail.splitlines()[0] if ok else detail}"
              for name, ok, detail in results]
     text = "\n".join(lines)
