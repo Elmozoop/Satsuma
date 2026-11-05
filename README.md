@@ -17,7 +17,8 @@ without opening a single app. Everything runs **locally on your PC** — files a
 2. Double-click it. That's all: no installer, no Python. A one-minute **tour** opens the first time,
    with a practice ring to try it on. Afterwards Satsuma waits in the system tray (the 🍊 by the clock);
    hold **Shift** while dragging a file to open the ring.
-3. Want it every time you sign in? Right-click the 🍊 → **Settings… → Trigger → Start when I sign in**.
+3. After the tour, Satsuma asks whether it should **start with Windows**. Changed your mind? Right-click
+   the 🍊 → **Settings… → Trigger → Start when I sign in**.
 
 Put `Satsuma.exe` anywhere you like (Documents, a Tools folder…). Your settings live in
 `%LOCALAPPDATA%\Satsuma`, so moving or updating the exe keeps them.

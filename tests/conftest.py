@@ -41,3 +41,12 @@ def pump(app, ms=50):
     while time.time() < end:
         app.processEvents()
         time.sleep(0.005)
+
+
+@pytest.fixture(autouse=True)
+def _no_autostart_question():
+    """The start-with-Windows question is modal; only its own test should see it."""
+    from satsuma.config import settings
+
+    settings.set("autostart_asked", True)
+    yield

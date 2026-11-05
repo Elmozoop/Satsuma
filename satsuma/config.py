@@ -8,7 +8,7 @@ from pathlib import Path
 
 APP_NAME = "Satsuma"
 APP_ID = "satsuma.win"
-VERSION = "1.14.0"
+VERSION = "1.15.0"
 # The anonymous user counter (see telemetry.py and server/). Empty: Satsuma sends nothing.
 STATS_URL = ""
 GITHUB_REPO = "Elmozoop/Satsuma"
@@ -61,6 +61,7 @@ DEFAULTS = {
     "scrim_opacity": 0.38,
     "drag_threshold": 12,         # px of movement before the menu arms
     "autostart": False,
+    "autostart_asked": False,  # asked once, after the first-run tour, whether to start with Windows
     "theme": "system",       # system | dark | light
     "smart_detect": True,      # only reveal the menu once real files are dragged
     # ---- look & feel

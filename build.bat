@@ -7,14 +7,8 @@ rem Builds dist\Satsuma.exe: one file people can download and double-click. No P
 call "%~dp0run.bat" --setup-only || exit /b 1
 ".venv\Scripts\python.exe" -m pip install pyinstaller==6.22.3 --disable-pip-version-check -q || goto :failed
 
-".venv\Scripts\python.exe" -m PyInstaller --noconfirm --clean --windowed --onefile ^
-    --name Satsuma ^
-    --icon assets\icon.ico ^
-    --add-data "assets;assets" ^
-    --collect-all pypdfium2 ^
-    --collect-all pypdfium2_raw ^
-    --collect-all pillow_heif ^
-    main.py || goto :failed
+rem What goes into the exe (and what is left out to make it start faster): satsuma-exe.spec
+".venv\Scripts\python.exe" -m PyInstaller --noconfirm --clean satsuma-exe.spec || goto :failed
 
 rem Packaging can quietly drop a plugin or DLL: let the exe check every engine itself.
 echo.

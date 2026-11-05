@@ -134,3 +134,34 @@ def test_tour_opens_on_first_launch_only(qapp, monkeypatch):
         satsuma.detector.stop()
         satsuma.watcher.stop()
         satsuma.tray.hide()
+
+
+def test_asks_once_about_starting_with_windows_after_the_tour(qapp, monkeypatch):
+    import satsuma.app as app_module
+    from satsuma import winutil
+    from satsuma.ui import controls
+
+    monkeypatch.setattr(app_module, "setup_logging", lambda: None)
+    asked, switched = [], []
+    monkeypatch.setattr(controls, "_dialog", lambda *a, **k: asked.append(a[1]) or "yes")
+    monkeypatch.setattr(winutil, "autostart_enabled", lambda: False)
+    monkeypatch.setattr(winutil, "set_autostart", lambda on: switched.append(on) or True)
+    satsuma = app_module.Satsuma(qapp)
+    try:
+        settings.set("autostart_asked", False)
+        satsuma.show_tutorial()
+        satsuma.tutorial_window.finish()
+        pump(qapp, 700)
+        assert asked == ["Start Satsuma with Windows?"] and switched == [True]
+        satsuma.ask_autostart()                               # only ever once
+        assert len(asked) == 1
+        settings.set("autostart_asked", False)
+        monkeypatch.setattr(winutil, "autostart_enabled", lambda: True)
+        satsuma.ask_autostart()                               # already on (from the tour): no question
+        assert len(asked) == 1
+    finally:
+        satsuma.detector.stop()
+        satsuma.watcher.stop()
+        satsuma.pinger.stop()
+        satsuma.updater.stop()
+        satsuma.tray.hide()

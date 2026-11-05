@@ -80,7 +80,7 @@ def run(report: Path | None = None) -> int:
         from .ui.tutorial import Tutorial
 
         window = Tutorial()
-        pages = window.stack.count()
+        pages = sum(window.page(i) is not None for i in range(window.stack.count()))   # build every page
         window.deleteLater()
         return _need(pages == 8, f"{pages} pages")
 

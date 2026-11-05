@@ -403,6 +403,25 @@ class Satsuma(QObject):
         if window is not None:
             window.deleteLater()
         self._idle.start()
+        QTimer.singleShot(400, self.ask_autostart)
+
+    def ask_autostart(self) -> None:
+        """Once, after the first tour: should Satsuma start by itself when the PC starts?"""
+        if settings.get("autostart_asked") or not self.detector.supported:
+            return
+        settings.set("autostart_asked", True)
+        if winutil.autostart_enabled():          # already switched on in the tour
+            return
+        from .ui import controls
+
+        answer = controls._dialog(
+            None, "Start Satsuma with Windows?",
+            "Satsuma can start by itself when you turn on your PC, so the ring is always ready when "
+            "you Shift-drag a file. It waits quietly in the tray and uses very little memory.\n\n"
+            "You can change this any time in Settings → Trigger.",
+            [("yes", "Start with Windows", True), ("no", "Not now", False)])
+        if answer == "yes":
+            winutil.set_autostart(True)
 
     def _reopen_settings(self) -> None:
         """Solid ↔ Glass: make the window again in the new style, on the same page and spot."""
@@ -520,7 +539,7 @@ def main(argv: list[str] | None = None) -> int:
     elif want_settings:
         QTimer.singleShot(0, satsuma.show_settings)
     elif not settings.get("tutorial_done"):
-        QTimer.singleShot(500, satsuma.show_tutorial)     # first run: the tour instead of a balloon
+        QTimer.singleShot(0, satsuma.show_tutorial)       # first run: the tour instead of a balloon
     elif not background:
         QTimer.singleShot(400, satsuma.greet)
     if after_update:

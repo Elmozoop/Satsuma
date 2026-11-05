@@ -197,7 +197,7 @@ class Tutorial(QDialog):
         self.setWindowFlags(Qt.Dialog | Qt.WindowCloseButtonHint | Qt.WindowStaysOnTopHint)
         glass_window(self, always=True)          # follows Glass/Solid live, even from step 7
         self.setFixedSize(820, 560)
-        self.photo = _sample_photo()
+        self._photo = None
 
         root = QVBoxLayout(self)
         root.setContentsMargins(28, 22, 28, 20)
@@ -224,24 +224,59 @@ class Tutorial(QDialog):
         footer.addWidget(self.next)
         root.addLayout(footer)
 
-        for build in (self._welcome, self._shift, self._practice, self._rings, self._cards, self._tray,
-                      self._yours, self._done):
-            self.stack.addWidget(build())
+        # Only the first page is built now; the rest are built just before they're needed, so the
+        # tour opens at once instead of after a second of making pages nobody has seen yet.
+        self._builders = [self._welcome, self._shift, self._practice, self._rings, self._cards, self._tray,
+                          self._yours, self._done]
+        self._built = [False] * len(self._builders)
+        for _ in self._builders:
+            self.stack.addWidget(QWidget())
+        self._build(0)
         self.setStyleSheet(stylesheet())
         listener = self._on_setting
         settings.subscribe(listener)
         self.destroyed.connect(lambda *_a: settings.unsubscribe(listener))
         self.go(0)
 
+    @property
+    def photo(self):
+        if self._photo is None:
+            self._photo = _sample_photo()
+        return self._photo
+
+    def _build(self, index: int) -> None:
+        if not 0 <= index < len(self._builders) or self._built[index]:
+            return
+        self._built[index] = True
+        placeholder = self.stack.widget(index)
+        current = self.stack.currentIndex()
+        self.stack.insertWidget(index, self._builders[index]())
+        self.stack.removeWidget(placeholder)
+        placeholder.deleteLater()
+        if current >= 0:
+            self.stack.setCurrentIndex(current)
+
+    def page(self, index: int) -> QWidget:
+        self._build(index)
+        return self.stack.widget(index)
+
     # ------------------------------------------------------------------ navigation
     def go(self, index: int) -> None:
         index = max(0, min(self.stack.count() - 1, index))
+        self._build(index)
         self.stack.setCurrentIndex(index)
+        QTimer.singleShot(250, lambda i=index + 1: self._build_if_alive(i))   # the next page, ready early
         last = index == self.stack.count() - 1
         self.back.setVisible(index > 0)
         self.skip.setVisible(not last)
         self.next.setText("Finish" if last else ("Show me" if index == 0 else "Next"))
         self.dots.setText("  ".join("●" if i == index else "○" for i in range(self.stack.count())))
+
+    def _build_if_alive(self, index: int) -> None:
+        try:
+            self._build(index)
+        except RuntimeError:          # the tour was closed in the meantime
+            pass
 
     def _next(self) -> None:
         if self.stack.currentIndex() == self.stack.count() - 1:
