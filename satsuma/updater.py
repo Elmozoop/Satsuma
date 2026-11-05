@@ -267,6 +267,7 @@ class Updater(QObject):
             relaunch(self._exe)
         except OSError as exc:        # e.g. a folder Satsuma isn't allowed to write to
             log.warning("couldn't install Satsuma %s: %s", version, exc)
+            settings.set("whats_new", {})
             self._failed.add(version)
             path.unlink(missing_ok=True)
             return

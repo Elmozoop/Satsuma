@@ -114,7 +114,9 @@ class _Filter(QAbstractNativeEventFilter):
 
     def nativeEventFilter(self, event_type, message):
         if event_type == b"windows_generic_MSG" or event_type == "windows_generic_MSG":
-            msg = ctypes.wintypes.MSG.from_address(int(message))
+            from ctypes import wintypes
+
+            msg = wintypes.MSG.from_address(int(message))
             if msg.message == WM_HOTKEY and msg.wParam == HOTKEY_ID:
                 self.owner.pressed.emit()
                 return True, 0
@@ -131,8 +133,6 @@ class Hotkey(QObject):
         self._registered = False
         self._filter = None
         if IS_WINDOWS:
-            import ctypes.wintypes  # noqa: F401  (MSG)
-
             self._filter = _Filter(self)
             QCoreApplication.instance().installNativeEventFilter(self._filter)
         settings.subscribe(self._on_setting)

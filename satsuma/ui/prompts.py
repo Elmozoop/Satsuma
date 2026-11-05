@@ -390,12 +390,14 @@ class RenamePrompt(_Base):
     ok_text = "Rename"
 
     def __init__(self, paths: list[Path]):
-        import os
-
         super().__init__("Rename", f"{len(paths)} files, numbered in file-name order", paths)
         self.paths = paths
         stems = [p.stem for p in paths]
-        guess = os.path.commonprefix(stems).rstrip(" _-0123456789") or "File"
+        shared = stems[0] if stems else ""
+        for stem in stems[1:]:                  # the start all the names have in common
+            while not stem.startswith(shared):
+                shared = shared[:-1]
+        guess = shared.rstrip(" _-0123456789") or "File"
         self.name = QLineEdit(f"{guess} ##")
         self.name.textChanged.connect(self._preview)
         self.start = QSpinBox(minimum=0, maximum=999999, value=1)

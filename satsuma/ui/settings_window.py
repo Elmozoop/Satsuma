@@ -710,7 +710,7 @@ class SettingsWindow(QDialog):
 
     # ================================================================== Trigger
     def _trigger_page(self) -> QWidget:
-        scroll, layout = self._page("Trigger", "How the ring opens while you drag files.")
+        scroll, layout = self._page("Trigger", "How the ring opens: while you drag files, or with a shortcut.")
         drag = self._section(layout, "Dragging")
         drag.add("Open the ring while dragging files", "Hold the key below as you drag",
                  _toggle("enabled"))
@@ -998,7 +998,7 @@ class SettingsWindow(QDialog):
                   "Everything runs on your PC. Files are never uploaded.", project)
         log = QPushButton("Open log")
         log.clicked.connect(lambda: open_file(LOG_FILE))
-        about.add("Something went wrong?", "The log has the details of every failed job", log)
+        about.add("Satsuma's log", "The details of every job, including any that failed", log)
         problem = QPushButton("Report a problem")
         problem.clicked.connect(self._report_problem)
         about.add("Found a bug?",

@@ -258,8 +258,7 @@ def strip_metadata(source) -> Path:
             original.save(destination, "JPEG", quality="keep", optimize=True)
             return destination
     with _load(source) as image:          # applies the EXIF rotation, so dropping EXIF is safe
-        clean = Image.new(image.mode, image.size)
-        clean.putdata(image.getdata())
+        clean = Image.frombytes(image.mode, image.size, image.tobytes())   # pixels only, no metadata
         if image.mode == "P":
             clean.putpalette(image.getpalette())
             if "transparency" in image.info:

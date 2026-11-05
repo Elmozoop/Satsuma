@@ -9,7 +9,7 @@ import tempfile
 from pathlib import Path
 
 from PySide6.QtCore import QMimeData, QPoint, QPointF, QRectF, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QDrag, QFont, QImage, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtGui import QColor, QDrag, QFont, QImage, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (QDialog, QFrame, QHBoxLayout, QLabel, QPushButton, QStackedWidget,
                                QVBoxLayout, QWidget)
 
@@ -342,7 +342,8 @@ class Tutorial(QDialog):
             "Hold Shift while you drag",
             "Start dragging any file, then hold <b>Shift</b>. A ring of actions springs open right under "
             "your pointer. Let go on the one you want.<br><br>"
-            "Prefer clicking?<br>• Right-click files → <b>Send to → Satsuma</b> (switch it on in Settings)<br>"
+            "Rather not drag?<br>• Select files and press <b>Ctrl+Shift+Space</b>: the ring opens at your pointer<br>"
+            "• Right-click files → <b>Send to → Satsuma</b> (switch it on in Settings)<br>"
             "• Click the 🍊 by the clock for a <b>drop window</b> you can drag files onto, no Shift needed",
             art)
 
@@ -416,6 +417,7 @@ class Tutorial(QDialog):
                            ("folder", "Recent: your last 10 results"),
                            ("rotate", "Undo the last conversion"),
                            ("info", "Info panel beside wedges: on or off"),
+                           ("doc", "Report a problem: opens a GitHub issue for you"),
                            ("gear", "Settings…  and this tour again")):
             row = QHBoxLayout()
             picture = QPixmap(48, 48)
@@ -498,6 +500,7 @@ class Tutorial(QDialog):
         rows.addWidget(_label("You can replay this tour any time from the 🍊 menu → <b>Tour</b>.", "hint"))
         return self._page(
             "You're all set",
-            "Next time you drag a file, hold <b>Shift</b>.<br><br>"
+            "Next time you drag a file, hold <b>Shift</b>. Or select files and press "
+            "<b>Ctrl+Shift+Space</b>.<br><br>"
             "Your originals are never changed: new files are saved next to them, and <b>Undo</b> is "
             "always one click away.", art)

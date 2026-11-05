@@ -18,7 +18,6 @@ from PySide6.QtCore import QPoint, QPointF, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QCursor, QGuiApplication, QPainter, QPen
 from PySide6.QtWidgets import QWidget
 
-from ..actions import Action
 from ..config import settings
 from ..explain import explain
 from .anim import FrameClock
