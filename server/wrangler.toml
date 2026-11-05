@@ -1,0 +1,17 @@
+# Deploy settings for the counter (used by `wrangler deploy` in this folder).
+# The secret STATS_KEY is set separately (`wrangler secret put STATS_KEY`) and is kept across deploys.
+name = "satsuma-stats"
+main = "worker.js"
+compatibility_date = "2025-01-01"
+workers_dev = true
+
+[[d1_databases]]
+binding = "DB"
+database_name = "satsuma-stats"
+database_id = "8b4bca83-6be0-474d-aa8c-e9c1e8148aa0"
+
+[triggers]
+crons = ["0 * * * *"]      # save GitHub's download totals every hour
+
+[observability]
+enabled = true

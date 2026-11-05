@@ -12,6 +12,23 @@ const ONLINE_SECONDS = 15 * 60;        // pings come every 10 minutes: online = 
 const KEEP_DAYS = 120;
 const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
+// The tables (same as schema.sql). Created on first use, so a new or updated counter needs no SQL
+// pasted by hand: deploying this file is enough. "IF NOT EXISTS" keeps existing data.
+const SCHEMA = [
+  "CREATE TABLE IF NOT EXISTS pings (id TEXT PRIMARY KEY, version TEXT, first_seen INTEGER NOT NULL, last_seen INTEGER NOT NULL)",
+  "CREATE INDEX IF NOT EXISTS pings_last_seen ON pings (last_seen)",
+  "CREATE TABLE IF NOT EXISTS daily (day TEXT NOT NULL, id TEXT NOT NULL, version TEXT, PRIMARY KEY (day, id))",
+  "CREATE TABLE IF NOT EXISTS downloads (at INTEGER PRIMARY KEY, total INTEGER NOT NULL, releases TEXT NOT NULL)",
+];
+let schemaReady = null;
+function ensureSchema(env) {
+  schemaReady ||= env.DB.batch(SCHEMA.map((sql) => env.DB.prepare(sql))).catch((error) => {
+    schemaReady = null;          // try again on the next request
+    throw error;
+  });
+  return schemaReady;
+}
+
 const dayOf = (seconds) => new Date(seconds * 1000).toISOString().slice(0, 10);
 
 function lastDays(now, count) {
@@ -20,19 +37,44 @@ function lastDays(now, count) {
   return days;
 }
 
-async function saveDownloads(env) {
-  const response = await fetch(`https://api.github.com/repos/${REPO}/releases?per_page=100`, {
-    headers: { "User-Agent": "satsuma-stats", Accept: "application/vnd.github+json" },
-  });
-  if (!response.ok) return;
-  const releases = await response.json();
-  const counts = {};
-  let total = 0;
-  for (const release of releases) {
-    const n = (release.assets || []).reduce((sum, asset) => sum + (asset.download_count || 0), 0);
-    counts[release.tag_name] = n;
-    total += n;
+// "1.2k" -> 1200, as shields.io writes big numbers.
+function shieldsNumber(text) {
+  const match = String(text || "").trim().toLowerCase().match(/^([\d.]+)\s*([kmb]?)/);
+  if (!match) return null;
+  return Math.round(parseFloat(match[1]) * ({ "": 1, k: 1e3, m: 1e6, b: 1e9 })[match[2]]);
+}
+
+// GitHub's download counts per release. GitHub sometimes refuses requests without a login from
+// Cloudflare's shared addresses; then the total comes from shields.io (what the README badge uses).
+async function readDownloads(env) {
+  const headers = { "User-Agent": "satsuma-stats", Accept: "application/vnd.github+json" };
+  if (env.GITHUB_TOKEN) headers.Authorization = `Bearer ${env.GITHUB_TOKEN}`;   // optional
+  const response = await fetch(`https://api.github.com/repos/${REPO}/releases?per_page=100`, { headers });
+  if (response.ok) {
+    const counts = {};
+    let total = 0;
+    for (const release of await response.json()) {
+      const n = (release.assets || []).reduce((sum, asset) => sum + (asset.download_count || 0), 0);
+      counts[release.tag_name] = n;
+      total += n;
+    }
+    return { total, counts };
   }
+  console.log(`GitHub said ${response.status}: ${(await response.text()).slice(0, 200)}`);
+  const badge = await fetch(`https://img.shields.io/github/downloads/${REPO}/total.json`,
+    { headers: { "User-Agent": "satsuma-stats" } });
+  if (!badge.ok) {
+    console.log(`shields.io said ${badge.status}`);
+    return null;
+  }
+  const total = shieldsNumber((await badge.json()).message);
+  return total === null ? null : { total, counts: {} };
+}
+
+async function saveDownloads(env) {
+  const found = await readDownloads(env);
+  if (!found) return;
+  const { total, counts } = found;
   const now = Math.floor(Date.now() / 1000);
   await env.DB.prepare("INSERT OR REPLACE INTO downloads (at, total, releases) VALUES (?1, ?2, ?3)")
     .bind(now, total, JSON.stringify(counts)).run();
@@ -90,7 +132,11 @@ const escape = (text) => String(text).replace(/[&<>"]/g, (c) => ({ "&": "&amp;",
 
 async function downloadsSvg(env, now) {
   const W = 760, H = 300, left = 52, right = 20, top = 54, bottom = 40;
-  const series = await downloadsByDay(env, now - 90 * 86400);
+  let series = await downloadsByDay(env, now - 90 * 86400);
+  if (!series.length) {            // nothing saved yet (a new counter): take today's numbers now
+    await saveDownloads(env);
+    series = await downloadsByDay(env, now - 90 * 86400);
+  }
   const latest = series.length ? series[series.length - 1] : null;
   const total = latest ? latest.total : 0;
   const ink = "#8b949e", accent = "#f97316";
@@ -124,6 +170,14 @@ async function downloadsSvg(env, now) {
   } else {
     // Not enough history yet: downloads of each release.
     const releases = latest ? Object.entries(latest.releases).reverse().slice(-12) : [];
+    if (!releases.length) {
+      parts.push(`<text x="${W / 2}" y="${top + plotH / 2 + 10}" font-size="44" font-weight="700" text-anchor="middle" fill="${accent}">${total.toLocaleString("en-US")}</text>`);
+      parts.push(`<text x="${W / 2}" y="${top + plotH / 2 + 40}" font-size="13" text-anchor="middle" fill="${ink}">downloads so far · the day-by-day chart appears after a couple of days</text>`);
+      parts.push("</svg>");
+      return new Response(parts.join(""), {
+        headers: { "Content-Type": "image/svg+xml; charset=utf-8", "Cache-Control": "public, max-age=3600" },
+      });
+    }
     const max = Math.max(1, ...releases.map(([, n]) => n));
     const step = plotW / Math.max(1, releases.length);
     releases.forEach(([tag, n], i) => {
@@ -145,6 +199,7 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     const now = Math.floor(Date.now() / 1000);
+    await ensureSchema(env);
 
     if (request.method === "POST" && url.pathname === "/ping") {
       let body;
@@ -181,6 +236,6 @@ export default {
   },
 
   async scheduled(_event, env, ctx) {
-    ctx.waitUntil(saveDownloads(env));
+    ctx.waitUntil(ensureSchema(env).then(() => saveDownloads(env)));
   },
 };

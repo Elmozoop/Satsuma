@@ -9,7 +9,8 @@ Everything below happens in the Cloudflare website; nothing to install.
 ## 1. Create the database
 1. Sign up or log in at <https://dash.cloudflare.com>.
 2. **Storage & Databases → D1 SQL Database → Create**. Name it `satsuma-stats`.
-3. Open it → **Console**, paste everything from [`schema.sql`](schema.sql), and press **Execute**.
+3. That's all for the database: the Worker creates its tables the first time it runs
+   ([`schema.sql`](schema.sql) shows what they are).
 
 ## 2. Create the Worker
 1. **Compute (Workers) → Workers & Pages → Create → Create Worker**. Name it `satsuma-stats`, **Deploy**.
@@ -30,9 +31,10 @@ Send that address to whoever builds Satsuma (or put it in `STATS_URL` in `satsum
 yourself and rebuild). Until it's set, Satsuma sends nothing.
 
 ## Updating an existing counter
-When `worker.js` or `schema.sql` change: paste `schema.sql` into the database's **Console** and
-**Execute** again (it only adds what's missing, nothing is lost), then **Edit code** on the Worker,
-paste the new `worker.js` and **Deploy**.
+The Worker creates any tables it needs by itself, so updating is just deploying the new `worker.js`:
+- **From the command line** (in this folder): `wrangler deploy`. [`wrangler.toml`](wrangler.toml)
+  holds the database binding and the hourly schedule; the `STATS_KEY` secret is kept.
+- **Or in the dashboard:** **Edit code** on the Worker, paste the new `worker.js`, **Deploy**.
 
 ## Check it
 - Open the address in a browser: it should say **Satsuma counter**.

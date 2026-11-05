@@ -314,6 +314,12 @@ satsuma-exe.spec, build.bat how Satsuma.exe is built
 ```
 </details>
 
+## Downloads over time
+
+[![Satsuma downloads](https://satsuma-stats.ryash0394.workers.dev/downloads.svg)](https://github.com/Elmozoop/Satsuma/releases)
+
+*Updated every hour from GitHub's release download counts.*
+
 ## Credits
 
 Satsuma was inspired by **Tangerine** by Leap Studio, a Mac app that opens a ring of file conversions
