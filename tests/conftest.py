@@ -50,3 +50,13 @@ def _no_autostart_question():
 
     settings.set("autostart_asked", True)
     yield
+
+
+@pytest.fixture(autouse=True)
+def _never_ping_the_real_counter(monkeypatch):
+    """Tests must not count as real users: the counter only ever sees a local stand-in."""
+    from satsuma import config, telemetry
+
+    monkeypatch.setattr(config, "STATS_URL", "")
+    monkeypatch.setattr(telemetry, "STATS_URL", "")
+    yield

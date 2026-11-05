@@ -8,9 +8,9 @@ from pathlib import Path
 
 APP_NAME = "Satsuma"
 APP_ID = "satsuma.win"
-VERSION = "1.15.0"
+VERSION = "1.15.1"
 # The anonymous user counter (see telemetry.py and server/). Empty: Satsuma sends nothing.
-STATS_URL = ""
+STATS_URL = "https://satsuma-stats.ryash0394.workers.dev"
 GITHUB_REPO = "Elmozoop/Satsuma"
 OWNER_FILE_NAME = "owner.json"     # only on the author's PC: unlocks the Stats window
 
