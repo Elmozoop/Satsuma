@@ -303,6 +303,25 @@ satsuma-exe.spec, build.bat how Satsuma.exe is built
 ```
 </details>
 
+## Credits
+
+Satsuma was inspired by **Tangerine** by Leap Studio, a Mac app that opens a ring of file conversions
+when you Shift-drag a file. Satsuma brings that idea to Windows. It's an independent app, written
+from scratch, and isn't affiliated with Tangerine or Leap Studio.
+
+Satsuma is built with [Qt for Python (PySide6)](https://doc.qt.io/qtforpython-6/),
+[Pillow](https://python-pillow.org/), [pdfium](https://github.com/pypdfium2-team/pypdfium2),
+[pypdf](https://github.com/py-pdf/pypdf) and [FFmpeg](https://ffmpeg.org/).
+
 ## License
 
 [MIT](LICENSE): free to use, change and share, including in your own projects. Keep the copyright notice.
+
+---
+
+<div align="center">
+
+*"Thanks for using Satsuma! I hope it saves you a few clicks every day."*<br>
+— **Yash** 🍊
+
+</div>
