@@ -13,6 +13,7 @@ Everything runs **on your PC**: your files are never uploaded.
 [![Downloads](https://img.shields.io/github/downloads/Elmozoop/Satsuma/total?color=f97316)](https://github.com/Elmozoop/Satsuma/releases)
 ![Windows 10 and 11](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4)
 ![Runs locally](https://img.shields.io/badge/files-never%20uploaded-2ea44f)
+[![MIT license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 ![Satsuma in action: Shift-drag a photo, the ring opens, drop it on WEBP](docs/demo.webp)
 
@@ -301,3 +302,7 @@ tools/make_screenshots.py   regenerates the pictures in docs/ from the app's own
 satsuma-exe.spec, build.bat how Satsuma.exe is built
 ```
 </details>
+
+## License
+
+[MIT](LICENSE): free to use, change and share, including in your own projects. Keep the copyright notice.
