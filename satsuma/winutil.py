@@ -19,6 +19,10 @@ VK_RBUTTON = 0x02
 SM_SWAPBUTTON = 23
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 RUN_VALUE = "Satsuma"
+# Windows' own on/off switch for each startup entry (Task Manager -> Startup apps). Current Windows 11
+# only runs entries marked enabled here, so switching start-at-sign-in on sets the mark as well.
+APPROVED_KEY = r"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run"
+APPROVED_ON = bytes([2] + [0] * 11)
 
 if IS_WINDOWS:
     import ctypes
@@ -117,17 +121,90 @@ def _quote(part: str) -> str:
 
 
 # ----------------------------------------------------------------------------- autostart
-def autostart_enabled() -> bool:
+def startup_approval() -> bytes | None:
+    """Windows' mark for Satsuma's startup entry, or None when there is none yet."""
     if not IS_WINDOWS:
-        return False
+        return None
+    import winreg
+
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, APPROVED_KEY) as key:
+            value = winreg.QueryValueEx(key, RUN_VALUE)[0]
+            return bytes(value) if value else None
+    except OSError:
+        return None
+
+
+def disabled_in_task_manager() -> bool:
+    """True when the user switched Satsuma off in Task Manager -> Startup apps (odd first byte)."""
+    mark = startup_approval()
+    return bool(mark) and mark[0] % 2 == 1
+
+
+def _set_approval(enabled: bool) -> None:
+    import winreg
+
+    try:
+        with winreg.CreateKeyEx(winreg.HKEY_CURRENT_USER, APPROVED_KEY, 0, winreg.KEY_SET_VALUE) as key:
+            if enabled:
+                winreg.SetValueEx(key, RUN_VALUE, 0, winreg.REG_BINARY, APPROVED_ON)
+            else:
+                try:
+                    winreg.DeleteValue(key, RUN_VALUE)
+                except FileNotFoundError:
+                    pass
+    except OSError as exc:
+        log.warning("couldn't mark the startup entry: %s", exc)
+
+
+def autostart_enabled() -> bool:
+    """Satsuma will start at sign-in: it is registered and not switched off in Task Manager."""
+    return registered_autostart() is not None and not disabled_in_task_manager()
+
+
+def autostart_command() -> str:
+    program, args = launch_command()
+    return " ".join(_quote(p) for p in [program, *args, "--background"])
+
+
+def registered_autostart() -> str | None:
+    """The command Windows runs at sign-in for Satsuma, or None."""
+    if not IS_WINDOWS:
+        return None
     import winreg
 
     try:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY) as key:
-            winreg.QueryValueEx(key, RUN_VALUE)
-            return True
+            return str(winreg.QueryValueEx(key, RUN_VALUE)[0])
     except OSError:
+        return None
+
+
+def program_of(command: str) -> str:
+    """The program a command line starts, quoted ("C:/a b/x.exe" --flag) or not (C:/a/x.exe --flag)."""
+    command = command.strip()
+    if command.startswith('"'):
+        return command[1:].split('"', 1)[0]
+    lower = command.lower()
+    end = lower.find(".exe")
+    return command[:end + 4] if end >= 0 else command.split(" ", 1)[0]
+
+
+def repair_autostart() -> bool:
+    """If start-at-sign-in points at a Satsuma that isn't there any more (the exe was moved or
+    renamed), point it at this one. A Satsuma that still exists elsewhere is left alone, so opening
+    a second copy never takes the setting over. True when it was repaired."""
+    command = registered_autostart()
+    if not command or disabled_in_task_manager():
+        return False                       # off, or switched off by the user in Task Manager
+    if os.path.exists(program_of(command)) or command == autostart_command():
+        if startup_approval() is None:     # switched on before Windows needed the mark (Satsuma < 1.16.3)
+            _set_approval(True)
+            log.info("start-at-sign-in: marked as enabled for Windows")
+            return True
         return False
+    log.info("start-at-sign-in pointed at %s, which is gone; now it starts this copy", program_of(command))
+    return set_autostart(True)
 
 
 def set_autostart(enabled: bool) -> bool:
@@ -138,14 +215,14 @@ def set_autostart(enabled: bool) -> bool:
     try:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY, 0, winreg.KEY_SET_VALUE) as key:
             if enabled:
-                program, args = launch_command()
-                command = " ".join(_quote(p) for p in [program, *args, "--background"])
-                winreg.SetValueEx(key, RUN_VALUE, 0, winreg.REG_SZ, command)
+                winreg.SetValueEx(key, RUN_VALUE, 0, winreg.REG_SZ, autostart_command())
+                _set_approval(True)
             else:
                 try:
                     winreg.DeleteValue(key, RUN_VALUE)
                 except FileNotFoundError:
                     pass
+                _set_approval(False)
         return True
     except OSError as exc:
         log.warning("autostart change failed: %s", exc)

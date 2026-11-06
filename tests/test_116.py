@@ -212,3 +212,70 @@ def test_resume_restores_the_tray_shortcut_and_detection(qapp, monkeypatch):
         assert satsuma.detector._timer.isActive() == satsuma.detector.supported
     finally:
         _stop(satsuma)
+
+
+# ----------------------------------------------------------------------------- start-at-sign-in after a move
+def test_program_of_reads_quoted_and_plain_commands():
+    from satsuma import winutil
+
+    assert winutil.program_of(r'"C:\My Apps\Satsuma.exe" --background') == r"C:\My Apps\Satsuma.exe"
+    assert winutil.program_of(r"C:\Tools\Satsuma.exe --background") == r"C:\Tools\Satsuma.exe"
+    assert winutil.program_of(r"C:\py\pythonw.exe C:\s\main.py --background") == r"C:\py\pythonw.exe"
+
+
+def test_autostart_follows_a_moved_exe_but_never_steals_from_another_copy(tmp_path, monkeypatch):
+    from satsuma import winutil
+
+    written, marked = [], []
+    approval = {"mark": bytes([2] + [0] * 11)}
+    monkeypatch.setattr(winutil, "autostart_command", lambda: f'"{tmp_path / "new place" / "Satsuma.exe"}" --background')
+    monkeypatch.setattr(winutil, "set_autostart", lambda on: written.append(on) or True)
+    monkeypatch.setattr(winutil, "startup_approval", lambda: approval["mark"])       # never the real registry
+    monkeypatch.setattr(winutil, "_set_approval", lambda on: marked.append(on))
+
+    monkeypatch.setattr(winutil, "registered_autostart", lambda: None)                 # switched off
+    assert not winutil.repair_autostart()
+
+    other = tmp_path / "Satsuma.exe"
+    other.write_bytes(b"MZ")
+    monkeypatch.setattr(winutil, "registered_autostart", lambda: f'"{other}" --background')
+    assert not winutil.repair_autostart()                                               # that copy still exists
+
+    gone = tmp_path / "Downloads" / "Satsuma.exe"
+    monkeypatch.setattr(winutil, "registered_autostart", lambda: f'"{gone}" --background')
+    assert winutil.repair_autostart() and written == [True]                             # moved: follow it
+
+    written.clear()
+    approval["mark"] = bytes([3] + [0] * 11)                                            # off in Task Manager
+    assert not winutil.repair_autostart() and written == []                             # the user's choice stays
+
+    approval["mark"] = None                                                             # on, but never marked
+    monkeypatch.setattr(winutil, "registered_autostart", lambda: f'"{other}" --background')
+    assert winutil.repair_autostart() and marked == [True] and written == []
+
+
+def test_switching_on_marks_it_for_windows_and_off_removes_both(monkeypatch):
+    import sys as _sys
+
+    from satsuma import winutil
+
+    if _sys.platform != "win32":
+        pytest.skip("Windows registry")
+    calls = []
+
+    class FakeKey:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    import winreg
+
+    monkeypatch.setattr(winreg, "OpenKey", lambda *a, **k: FakeKey())
+    monkeypatch.setattr(winreg, "SetValueEx", lambda key, name, _r, kind, value: calls.append(("set", name, value)))
+    monkeypatch.setattr(winreg, "DeleteValue", lambda key, name: calls.append(("delete", name)))
+    marks = []
+    monkeypatch.setattr(winutil, "_set_approval", lambda on: marks.append(on))
+    assert winutil.set_autostart(True) and calls[0][0] == "set" and marks == [True]
+    assert winutil.set_autostart(False) and calls[-1] == ("delete", "Satsuma") and marks == [True, False]

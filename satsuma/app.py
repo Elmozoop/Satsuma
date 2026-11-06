@@ -618,6 +618,7 @@ def main(argv: list[str] | None = None) -> int:
 
     satsuma = Satsuma(app)
     satsuma.listen()
+    winutil.repair_autostart()          # the exe was moved since start-at-sign-in was switched on
     if files:
         QTimer.singleShot(0, lambda: satsuma.handle_request(payload))
     elif want_settings:

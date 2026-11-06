@@ -214,6 +214,15 @@ a Tools folder. Also check **Settings → About → Update automatically** is on
 </details>
 
 <details>
+<summary><b>Satsuma didn't start when I turned on my PC.</b></summary>
+
+Switch on **Settings → Trigger → Start when I sign in** (Satsuma also asks after the tour). If it's on
+and Satsuma still doesn't start, open **Task Manager → Startup apps** and make sure **Satsuma** is
+*Enabled* there. Moved `Satsuma.exe` to another folder? Open it once from its new place and it starts
+from there from then on.
+</details>
+
+<details>
 <summary><b>Does it work on Windows 10?</b></summary>
 
 Yes, Windows 10 and 11 (64-bit). The Glass style looks best on Windows 11, which has the newer
