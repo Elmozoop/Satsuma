@@ -175,3 +175,40 @@ def test_stats_window_draws_day_by_day_charts(qapp, tmp_path, monkeypatch):
         assert not window.grab().isNull()
     finally:
         window.done(0)
+
+
+# ----------------------------------------------------------------------------- waking from sleep
+def test_waking_from_sleep_brings_everything_back(qapp, monkeypatch):
+    import time as clock
+
+    import satsuma.app as app_module
+
+    monkeypatch.setattr(app_module, "setup_logging", lambda: None)
+    satsuma = app_module.Satsuma(qapp)
+    resumed = []
+    monkeypatch.setattr(satsuma, "resume", lambda: resumed.append(1))
+    try:
+        satsuma._wall = clock.time() - 5            # an ordinary tick: nothing to do
+        satsuma._check_wake()
+        assert resumed == []
+        satsuma._wall = clock.time() - 8 * 3600     # the laptop slept overnight
+        satsuma._check_wake()
+        assert resumed == [1]
+    finally:
+        _stop(satsuma)
+
+
+def test_resume_restores_the_tray_shortcut_and_detection(qapp, monkeypatch):
+    import satsuma.app as app_module
+
+    monkeypatch.setattr(app_module, "setup_logging", lambda: None)
+    satsuma = app_module.Satsuma(qapp)
+    applied = []
+    monkeypatch.setattr(satsuma.hotkey, "apply", lambda: applied.append(1) or True)
+    try:
+        satsuma.tray.hide()
+        satsuma.resume()
+        assert applied == [1]
+        assert satsuma.detector._timer.isActive() == satsuma.detector.supported
+    finally:
+        _stop(satsuma)

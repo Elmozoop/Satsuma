@@ -53,6 +53,18 @@ def setup_logging() -> None:
         logging.getLogger("satsuma").critical("uncaught", exc_info=(exc_type, exc, tb))
 
     sys.excepthook = hook
+    try:  # a crash inside Qt or Windows itself never reaches excepthook: write its trace to the log
+        import faulthandler
+
+        global _CRASH_LOG
+        _CRASH_LOG = open(LOG_FILE, "a", encoding="utf-8")
+        faulthandler.enable(file=_CRASH_LOG, all_threads=True)
+    except (OSError, ValueError):
+        pass
+
+
+_CRASH_LOG = None
+WAKE_CHECK_MS = 15_000
 
 
 def app_icon() -> QIcon:
@@ -144,6 +156,11 @@ class Satsuma(QObject):
             signal.connect(self._idle.start)
 
         self._build_tray()
+        self._wall = time.time()
+        self._wake = QTimer(self)
+        self._wake.setInterval(WAKE_CHECK_MS)
+        self._wake.timeout.connect(self._check_wake)
+        self._wake.start()
         self.detector.start()
         self._idle.start()
 
@@ -498,6 +515,22 @@ class Satsuma(QObject):
         else:
             self.menu.open_pinned()                 # nothing selected: the drop window instead
 
+    def _check_wake(self) -> None:
+        """After sleep or standby: make sure Satsuma is fully back (tray icon, shortcut, drag detection)."""
+        now = time.time()
+        gap, self._wall = now - self._wall, now
+        if gap < WAKE_CHECK_MS / 1000 + 45:
+            return
+        log.info("woke up after %.0f min asleep; checking everything is running", gap / 60)
+        self.resume()
+
+    def resume(self) -> None:
+        if not self.tray.isVisible():
+            self.tray.show()
+        self.hotkey.apply()
+        self.detector.stop()
+        self.detector.start()
+
     def _idle_for_update(self) -> bool:
         """Nothing on screen and nothing running: a restart now goes unnoticed."""
         return not (self.menu.isVisible() or self.toasts.isVisible() or self.settings_window is not None
@@ -527,6 +560,7 @@ class Satsuma(QObject):
             QTimer.singleShot(3000, lambda: self._clean_old(tries - 1))
 
     def quit(self) -> None:
+        log.info("quitting")
         self.detector.stop()
         self.watcher.stop()
         self.pinger.stop()
